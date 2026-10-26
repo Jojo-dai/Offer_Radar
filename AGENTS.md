@@ -18,6 +18,7 @@
 - [ ] 3 个定时任务存在，时间分别为 08:00 / 18:00 / 每小时
 - [ ] `bash scripts/check-network.sh` 两条硬断言全过；未过时领英段必须跳过而不是直连抓取
 - [ ] 手动点「⚡ 通知 Agent 立即采集」→ `agent_tasks` 出现 1 条 `pending` 记录 → 下一小时检查点消费后变 `done` / `failed`（含原因）
+- [ ] `docs/assets/architecture.svg` 与 `docs/assets/workflow.svg` 存在且被 README 引用（整体架构 + 七步工作流各一张）
 
 ---
 

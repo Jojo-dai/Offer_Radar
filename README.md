@@ -39,6 +39,13 @@
 
 ## 整体架构
 
+<p align="center">
+  <img src="docs/assets/architecture.svg" alt="整体架构图：用户界面 → 云服务 → 定时任务 → 采集通道" width="900">
+</p>
+
+<details>
+<summary>文字版架构图（无图片环境 / 纯文本阅读）</summary>
+
 ```
                     ┌─────────────────────────────────────────┐
    你的浏览器 ──────▶│  app/index.html（单文件 SPA）            │
@@ -67,6 +74,8 @@
           猎聘（无头浏览器）      领英（用户真实 Edge + 代理）
 ```
 
+</details>
+
 **两条数据链路**
 
 - **写链路**：定时任务 / 手动请求 → 采集 → 全状态查重 → 入库 → 自动打分
@@ -76,7 +85,11 @@
 
 ## 完整工作流（7 步）
 
-前 3 步是**一次性串行**（做完并确认后不再重复）；第 4-7 步**每天循环**。
+<p align="center">
+  <img src="docs/assets/workflow.svg" alt="七步工作流：阶段一建画像（一次性），阶段二日常循环，橙色节点为人机交界点" width="900">
+</p>
+
+前 3 步是**一次性串行**（做完并确认后不再重复）；第 4-7 步**每天循环**。图中橙色节点是必须由你亲手完成的人机交界点，其余由 Agent 自动完成。
 
 ### 阶段一：建画像（一次性，串行）
 
@@ -348,13 +361,16 @@ job-apply-agent/
 │   ├── 06-network.md             ← 网络边界与领英可达性判定
 │   ├── 07-matching-jev.md        ← JEV 五维打分方法论
 │   ├── 08-faq.md                 ← 排错与常见问题
+│   ├── assets/
+│   │   ├── architecture.svg      ← 整体架构图（README 首图）
+│   │   └── workflow.svg          ← 七步工作流图
 │   └── collect/
 │       ├── liepin-bookmarklet.md ← 猎聘书签采集安装说明
 │       └── linkedin-bookmarklet.md
 ├── scripts/
 │   ├── schema.sql                ← 建表 + RLS + GRANT
 │   ├── dedupe.sql                ← 全状态查重与清理
-│   └── check-network.sh          ← 领英可达性三断言
+│   └── check-network.sh          ← 领英可达性自检（两条硬断言）
 ├── config/
 │   └── config.example.json       ← 需要替换的占位配置
 └── samples/
