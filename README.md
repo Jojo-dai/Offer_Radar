@@ -52,7 +52,7 @@
 
 ```bash
 # 方式 1 · git clone（推荐，可随时 git pull 更新）
-git clone https://github.com/Jojo-dai/offer-radar.git
+git clone https://github.com/Jojo-dai/Offer_Radar.git
 cd offer-radar
 ```
 
