@@ -95,6 +95,31 @@
   .timeline li{padding:8px 0 8px 18px;border-left:2px solid var(--line);position:relative;margin-left:6px}
   .timeline li::before{content:"";position:absolute;left:-5px;top:14px;width:8px;height:8px;border-radius:50%;background:var(--brand)}
   .timeline .t{color:var(--sub);font-size:12px}
+
+  /* ===== 首次运行引导（三问） ===== */
+  .source-bar{background:#fff;border-bottom:1px solid var(--line);padding:8px 24px;display:flex;align-items:center;gap:10px;font-size:12px;color:var(--sub);flex-wrap:wrap}
+  .source-bar .pill{display:inline-flex;align-items:center;gap:5px;padding:2px 9px;border-radius:999px;font-size:12px;border:1px solid var(--line);background:#fafbfc;color:var(--txt)}
+  .source-bar .pill.ok{background:var(--ok-weak);border-color:#bfe7cb;color:var(--ok)}
+  .source-bar .pill.warn{background:var(--warn-weak);border-color:#f3ddb8;color:var(--warn)}
+  .source-bar .pill.info{background:var(--brand-weak);border-color:#cddcff;color:var(--brand)}
+  .onb-mask{position:fixed;inset:0;background:rgba(15,23,42,.46);display:flex;align-items:center;justify-content:center;z-index:60;padding:20px}
+  .onb{background:#fff;border-radius:16px;max-width:720px;width:100%;max-height:92vh;overflow:auto;padding:24px 26px;box-shadow:0 24px 60px rgba(15,23,42,.24)}
+  .onb-steps{display:flex;gap:8px;margin-bottom:16px}
+  .onb-steps i{height:4px;border-radius:2px;background:var(--line);flex:1;font-style:normal}
+  .onb-steps i.done{background:var(--brand)}
+  .onb h2{font-size:19px;margin-bottom:4px}
+  .onb .sub{color:var(--sub);font-size:13px;margin-bottom:16px}
+  .opt{display:block;width:100%;text-align:left;border:1.5px solid var(--line);background:#fff;border-radius:12px;padding:13px 15px;margin-bottom:10px;transition:.15s}
+  .opt:hover{border-color:#c7d2fe;background:#fbfcff}
+  .opt.sel{border-color:var(--brand);background:var(--brand-weak)}
+  .opt .t{font-weight:600;font-size:14px;margin-bottom:3px;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+  .opt .d{color:var(--sub);font-size:12.5px;line-height:1.55}
+  .opt .tag{font-size:11px;padding:1px 7px;border-radius:999px;background:#eef2f7;color:var(--sub);font-weight:500}
+  .onb-note{background:#fef2f2;border:1px solid #fecaca;color:#b91c1c;border-radius:10px;padding:10px 12px;font-size:12.5px;margin-top:12px;line-height:1.6}
+  .onb-actions{display:flex;justify-content:space-between;align-items:center;margin-top:18px;gap:10px}
+  .probe{font-size:12.5px;margin-top:10px;padding:9px 11px;border-radius:9px;background:#f8fafc;border:1px solid var(--line);color:var(--sub);line-height:1.6}
+  .probe.ok{background:var(--ok-weak);border-color:#bfe7cb;color:var(--ok)}
+  .probe.warn{background:var(--warn-weak);border-color:#f3ddb8;color:var(--warn)}
 </style>
 </head>
 <body>
@@ -122,6 +147,10 @@
     </nav>
     <span class="row"><span class="muted" id="userName"></span> <button class="btn ghost small" id="logoutBtn">退出</button></span>
   </header>
+
+  <!-- 岗位来源状态条：常驻，随「首次运行引导」的选择变化，随时可见 -->
+  <div id="sourceBar" class="source-bar" style="display:none"></div>
+
   <main>
 
     <!-- ① 简历画像 -->
@@ -244,17 +273,29 @@
   </main>
 </div>
 
+<!-- 首次运行引导（三问，选项式） -->
+<div id="onbMask" class="onb-mask" style="display:none">
+  <div class="onb">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
+      <span class="muted">首次运行 · 3 个问题 · 结果会显示在顶部状态条</span>
+      <button class="btn ghost small" id="onbSkip">稍后再说</button>
+    </div>
+    <div id="onbBody"></div>
+    <div class="onb-actions">
+      <button class="btn ghost" id="onbBack" style="display:none">← 上一步</button>
+      <span style="display:flex;gap:10px">
+        <button class="btn ghost" id="onbProbeBtn" style="display:none">🔍 检测网络</button>
+        <button class="btn" id="onbNext" disabled>下一步</button>
+      </span>
+    </div>
+  </div>
+</div>
+
 <div class="toast" id="toast"></div>
 
 <script src="https://cdn.jsdelivr.net/npm/@tencent-ai/workbuddy-cloud-sdk@dev/lib/index.global.js"></script>
 <script>
-/* ===== 云服务初始化 =====
-   把下面三项替换成你自己的应用信息（在你的云应用「发布/配置」面板里能找到）：
-     endpoint        你的应用发布域名，形如 https://<your-app>.app.workbuddy.host
-     publishableKey  你的可公开客户端 Key，形如 wbpk_<applicationId>_<...>
-   注意：不要提交真实 Key 到公开仓库——虽然名为 publishable，但它绑定你的应用实例，
-   别人拿到就能读写你数据库里他能通过 RLS 的部分。
-*/
+/* ===== 云服务初始化（publicConfig 由云端环境注入）===== */
 const publicConfig = {
   endpoint: 'https://<your-app>.app.workbuddy.host',
   oauthRelayBaseUrl: 'https://www.workbuddy.cn/v2/as/genie-baas/oauth',
@@ -301,6 +342,8 @@ function enterApp(sess){
   $('#userName').textContent = session.user?.name ? '👤 ' + session.user.name : '';
   loadProfileView(); loadPool(); loadConfirm(); startAutoRefresh();
   switchTab('profile');
+  renderSourceBar();
+  if(!loadOnb()) openOnboarding();
 }
 $('#loginBtn').onclick = async () => {
   $('#loginError').textContent = '';
@@ -1008,6 +1051,146 @@ async function updateStatus(id, status, note){
     loadDashboard();
   }catch(e){ toast('更新失败：' + (e.message||e)); }
 }
+
+/* ===== 首次运行引导（三问 · 选项式 · 结果本地持久化） ===== */
+const ONB_KEY = 'ja_onboarding_v1';
+function loadOnb(){ try{ return JSON.parse(localStorage.getItem(ONB_KEY) || 'null'); }catch(e){ return null; } }
+function saveOnb(o){ try{ localStorage.setItem(ONB_KEY, JSON.stringify(o)); }catch(e){} }
+
+let onbDraft = null, onbStep = 1;
+
+const ONB_DEF = [
+  {
+    key:'identityMode',
+    title:'第 1 问 · 数据存在哪、Agent 用什么身份写库',
+    sub:'这一项决定简历与岗位数据的隔离方式，不是界面偏好',
+    options:[
+      { v:'workbuddy', t:'WorkBuddy 账号', tag:'推荐 · 零配置',
+        d:'数据存在我的 WorkBuddy 云应用里。登录走 OAuth，每次请求带 JWT，数据库按 auth.uid() 只返回我自己的行——前端被改也越不过。' },
+      { v:'selfhosted', t:'自建 PostgreSQL / Supabase', tag:'需自建',
+        d:'数据存在我自己的库里。需要先执行 schema.sql 与 auth-isolation.sql（非特权角色 + FORCE RLS），并跑过越权自检。若应用仍托管在 WorkBuddy，登录实际还是 OAuth，此项记录的是迁移目标形态。' }
+    ]
+  },
+  {
+    key:'resumeStorage',
+    title:'第 2 问 · 上传的简历文本要不要落库',
+    sub:'原始文件始终不上传、解析全在浏览器本地；这里决定的是解析后的文本',
+    options:[
+      { v:'db', t:'落库（默认）', tag:'省事',
+        d:'脱敏后（手机号 / 邮箱 / 身份证 / 住址已替换）的前 20000 字存入 profiles.resume_text，只有你自己能读。好处：重跑流程不用重传简历。' },
+      { v:'profile_only', t:'只存结构化画像', tag:'最敏感选这个',
+        d:'不写简历原文，只保留目标岗位 / 关键词 / 优势 / 短板。代价：重新分析要重新上传简历。' }
+    ]
+  },
+  {
+    key:'sourceMode',
+    title:'第 3 问 · 岗位来源：要不要启用领英',
+    sub:'领英必须走境外网络。选错了不会报错，只会静默只剩一个来源——所以必须在这里让你看见',
+    options:[
+      { v:'dual', t:'启用领英：我有稳定的境外网络', tag:'双来源 · 猎聘 + 领英',
+        d:'保存后先做一次浏览器连通性探测；但能不能真正跑，以 Agent 侧 check-network.sh 的两条硬断言为准（浏览器判断不了是否被重定向到 linkedin.cn）。' },
+      { v:'liepin_only', t:'只用猎聘：我没有 / 不确定有没有代理', tag:'单来源',
+        d:'领英整段跳过、不尝试直连。你只会看到猎聘岗位，领英的岗位链接可能打不开——这是预期行为，不是故障。' },
+      { v:'liepin_only_manual', t:'我有网络，但这次先不启用领英', tag:'单来源',
+        d:'同上，但记录为用户主动关闭。想开的时候点顶部状态条右侧的「修改」即可。' }
+    ]
+  }
+];
+
+function openOnboarding(){
+  onbStep = 1;
+  onbDraft = loadOnb() || {};
+  $('#onbMask').style.display = 'flex';
+  renderOnb();
+}
+function closeOnboarding(){ $('#onbMask').style.display = 'none'; }
+
+function renderOnb(){
+  const def = ONB_DEF[onbStep - 1];
+  const cur = onbDraft[def.key];
+  const bars = ONB_DEF.map((_, i) => `<i class="${i < onbStep - 1 ? 'done' : ''}"></i>`).join('');
+  const opts = def.options.map(o => `
+    <button class="opt ${cur === o.v ? 'sel' : ''}" data-v="${o.v}">
+      <div class="t">${esc(o.t)}<span class="tag">${esc(o.tag)}</span></div>
+      <div class="d">${esc(o.d)}</div>
+    </button>`).join('');
+  const probeSlot = (onbStep === 3 && cur === 'dual')
+    ? `<div class="probe" id="onbProbe">点右下「🔍 检测网络」做一次浏览器侧探测（可选）。</div>` : '';
+  const warnSlot = (onbStep === 3 && cur && cur !== 'dual')
+    ? `<div class="onb-note">⚠ 你选择了<b>仅猎聘</b>：领英采集整段跳过，不会尝试直连；<b>领英岗位链接此时可能打不开，属预期行为</b>。这个状态会一直显示在顶部状态条，随时可以点「修改」换回来。</div>` : '';
+
+  $('#onbBody').innerHTML = `
+    <div class="onb-steps">${bars}</div>
+    <h2>${esc(def.title)}</h2>
+    <p class="sub">${esc(def.sub)}</p>
+    ${opts}${probeSlot}${warnSlot}`;
+
+  $('#onbBody').querySelectorAll('.opt').forEach(b => b.onclick = () => {
+    onbDraft[def.key] = b.dataset.v;
+    renderOnb();
+  });
+  $('#onbBack').style.display = onbStep === 1 ? 'none' : 'inline-block';
+  $('#onbProbeBtn').style.display = (onbStep === 3 && cur === 'dual') ? 'inline-block' : 'none';
+  $('#onbNext').textContent = onbStep === 3 ? '完成配置' : '下一步';
+  $('#onbNext').disabled = !cur;
+}
+
+async function probeLinkedIn(){
+  const box = $('#onbProbe'); if(!box) return;
+  box.className = 'probe'; box.textContent = '正在探测 www.linkedin.com …';
+  const t0 = performance.now();
+  const ctrl = new AbortController();
+  const tid = setTimeout(() => ctrl.abort(), 9000);
+  try{
+    await fetch('https://www.linkedin.com/jobs/', { mode:'no-cors', cache:'no-store', signal: ctrl.signal });
+    const ms = Math.round(performance.now() - t0);
+    box.className = 'probe ok';
+    box.innerHTML = `✅ 浏览器能连到 linkedin.com（${ms}ms）。但浏览器只判断得了「连得上」，判断不了是否被重定向到 linkedin.cn —— 最终以 Agent 侧 <code>check-network.sh</code> 的两条硬断言为准。`;
+    onbDraft.probe = { ok:true, ms, at:new Date().toISOString() };
+  }catch(e){
+    const ms = Math.round(performance.now() - t0);
+    box.className = 'probe warn';
+    box.innerHTML = `⚠ 连不上（${ms}ms，${esc(e.name || 'error')}）。可能是没开代理、代理没覆盖这个域名，或 DNS 被劫持。建议改选「只用猎聘」，或先修好网络再回来。`;
+    onbDraft.probe = { ok:false, ms, at:new Date().toISOString() };
+  }finally{ clearTimeout(tid); }
+}
+
+function finishOnb(){
+  onbDraft.sourceMode = onbDraft.sourceMode === 'dual' ? 'dual' : 'liepin_only';
+  onbDraft.savedAt = new Date().toISOString();
+  saveOnb(onbDraft);
+  closeOnboarding();
+  renderSourceBar();
+  const dual = onbDraft.sourceMode === 'dual';
+  toast(dual ? '✅ 已保存：岗位来源 = 猎聘 + 领英' : '✅ 已保存：岗位来源 = 仅猎聘（领英未启用）');
+}
+
+function renderSourceBar(){
+  const c = loadOnb();
+  const bar = $('#sourceBar');
+  if(!c){ bar.style.display = 'none'; return; }
+  const dual = c.sourceMode === 'dual';
+  const idn = c.identityMode === 'workbuddy' ? 'WorkBuddy 账号' : '自建库';
+  const res = c.resumeStorage === 'db' ? '简历脱敏文本落库' : '只存画像 · 不存原文';
+  bar.style.display = 'flex';
+  bar.innerHTML = `
+    <span>岗位来源</span>
+    <span class="pill ${dual ? 'ok' : 'warn'}">${dual ? '猎聘 + 领英' : '仅猎聘（领英未启用）'}</span>
+    <span>数据</span><span class="pill info">${esc(idn)}</span>
+    <span>简历</span><span class="pill">${esc(res)}</span>
+    ${dual ? '' : '<span style="color:var(--warn)">· 领英链接可能打不开，属预期</span>'}
+    <span style="margin-left:auto"><button class="btn ghost small" id="onbReopen">修改</button></span>`;
+  $('#onbReopen').onclick = () => openOnboarding();
+}
+
+$('#onbNext').onclick = () => {
+  const def = ONB_DEF[onbStep - 1];
+  if(!onbDraft[def.key]) return;
+  if(onbStep < 3){ onbStep++; renderOnb(); } else finishOnb();
+};
+$('#onbBack').onclick = () => { if(onbStep > 1){ onbStep--; renderOnb(); } };
+$('#onbProbeBtn').onclick = probeLinkedIn;
+$('#onbSkip').onclick = () => { closeOnboarding(); toast('已跳过。下次打开应用还会再问一次（顶部状态条暂不显示）'); };
 
 /* ===== 启动 ===== */
 restoreAuth();
