@@ -310,7 +310,7 @@ curl -s -o /dev/null -w '%{http_code} %{redirect_url}\n' \
 
 1. **建云应用**：在 WorkBuddy 里创建一个带云服务（数据库 + 免密钥 LLM + 用户认证）的应用，拿到 `applicationId`
 2. **建表**：把 [`scripts/schema.sql`](scripts/schema.sql) 在云数据库执行（含建表、GRANT、RLS 策略）
-3. **部署前端**：把 `app/index.html` 作为静态站点发布（它通过 Cloud SDK 自动识别所属应用，无需写死 `applicationId`）
+3. **部署前端**：把 `app/index.html` 里的 `publicConfig` 三行换成你自己的（`endpoint` / `publishableKey` / `oauthRelayBaseUrl`），再作为静态站点发布。仓库里是占位符，不填跑不起来——这是刻意的，避免把别人的部署 key 带进你的环境
 4. **建 3 个定时任务**：把 [`docs/05-automations.md`](docs/05-automations.md) 里的三段 prompt 原样粘贴，时间分别设 08:00 / 18:00 / 每小时
 5. **改配置**：把 [`config/config.example.json`](config/config.example.json) 里的占位（`applicationId`、`shareLink`、关键词默认值）替换成你自己的，并同步到 prompt 里
 6. **验网络**：跑 `bash scripts/check-network.sh`，三条断言都过再启用领英部分
