@@ -1,0 +1,1010 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>投递助手 · 简历分析与岗位投递跟踪</title>
+<style>
+  :root{
+    --bg:#f5f6f8; --card:#ffffff; --line:#e5e7eb; --txt:#1f2329; --sub:#6b7280;
+    --brand:#2f6bff; --brand-weak:#eaf0ff; --ok:#16a34a; --ok-weak:#e7f7ec;
+    --warn:#d97706; --warn-weak:#fdf3e3; --bad:#dc2626; --bad-weak:#fdeaea;
+    --purple:#7c3aed; --purple-weak:#f1eafd;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:"PingFang SC","Microsoft YaHei",system-ui,sans-serif;background:var(--bg);color:var(--txt);font-size:14px;line-height:1.6}
+  button{cursor:pointer;font-family:inherit}
+  input,textarea,select{font-family:inherit;font-size:14px;border:1px solid var(--line);border-radius:8px;padding:8px 10px;background:#fff;color:var(--txt)}
+  input:focus,textarea:focus,select:focus{outline:2px solid var(--brand-weak);border-color:var(--brand)}
+  textarea{width:100%;resize:vertical}
+  .btn{border:none;border-radius:8px;padding:8px 16px;font-size:14px;background:var(--brand);color:#fff}
+  .btn:hover{filter:brightness(1.08)}
+  .btn:disabled{opacity:.5;cursor:not-allowed}
+  .btn.ghost{background:#fff;color:var(--txt);border:1px solid var(--line)}
+  .btn.danger{background:#fff;color:var(--bad);border:1px solid #f3c6c6}
+  .btn.small{padding:4px 10px;font-size:12px;border-radius:6px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px;margin-bottom:16px}
+  .muted{color:var(--sub);font-size:12px}
+  /* login */
+  .login-wrap{min-height:100vh;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:16px}
+  .login-card{background:#fff;border:1px solid var(--line);border-radius:16px;padding:40px 48px;text-align:center;max-width:420px}
+  .login-card h1{font-size:22px;margin-bottom:8px}
+  /* layout */
+  header.top{background:#fff;border-bottom:1px solid var(--line);padding:12px 24px;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:10}
+  header.top .logo{font-weight:700;font-size:16px}
+  nav.tabs{display:flex;gap:4px}
+  nav.tabs button{border:none;background:transparent;padding:8px 14px;border-radius:8px;color:var(--sub);font-size:14px}
+  nav.tabs button.active{background:var(--brand-weak);color:var(--brand);font-weight:600}
+  main{max-width:1080px;margin:20px auto;padding:0 20px}
+  .tab-view{display:none}
+  .tab-view.active{display:block}
+  nav.subtabs{display:flex;gap:6px;margin:0 0 14px}
+  nav.subtabs button{border:1px solid var(--line);background:var(--card);padding:8px 16px;border-radius:10px;color:var(--sub);font-size:13px;cursor:pointer}
+  nav.subtabs button.active{background:var(--brand-weak);color:var(--brand);border-color:var(--brand-weak);font-weight:600}
+  nav.subtabs button .cnt{display:inline-block;min-width:18px;margin-left:4px;padding:0 5px;border-radius:9px;background:var(--brand);color:#fff;font-size:11px;line-height:16px;text-align:center}
+  .sub-view{display:none}
+  .sub-view.active{display:block}
+  h2{font-size:16px;margin-bottom:12px}
+  h3{font-size:14px;margin:12px 0 6px}
+  .row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+  @media(max-width:760px){.grid2{grid-template-columns:1fr}}
+  /* status badge */
+  .badge{display:inline-block;padding:2px 10px;border-radius:20px;font-size:12px;white-space:nowrap}
+  .st-待确认{background:var(--warn-weak);color:var(--warn)}
+  .st-待投递{background:var(--brand-weak);color:var(--brand)}
+  .st-已投递{background:var(--ok-weak);color:var(--ok)}
+  .st-已查看{background:var(--purple-weak);color:var(--purple)}
+  .st-已回复{background:var(--purple-weak);color:var(--purple)}
+  .st-面试邀请{background:#ffe8f0;color:#d61f69}
+  .st-不合适,.st-已拒绝{background:#eef0f2;color:var(--sub)}
+  /* job card */
+  .job{border:1px solid var(--line);border-radius:10px;padding:12px 14px;margin-bottom:10px;background:#fff}
+  .job .head{display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap}
+  .job .company{font-weight:700;font-size:15px}
+  .job .pos{color:var(--brand);font-weight:600}
+  .job .meta{display:flex;gap:14px;flex-wrap:wrap;margin:6px 0;color:var(--sub);font-size:13px}
+  .job .summary{color:var(--txt);font-size:13px;margin:6px 0}
+  .score{font-weight:700;color:var(--brand)}
+  .checkbox{transform:scale(1.2);margin-right:6px}
+  .profile-block{background:#fafbfc;border:1px dashed var(--line);border-radius:10px;padding:12px;margin-top:10px}
+  .tag{display:inline-block;background:var(--brand-weak);color:var(--brand);border-radius:6px;padding:1px 8px;margin:2px;font-size:12px}
+  .plat{display:inline-block;border-radius:6px;padding:1px 8px;font-size:12px;font-weight:600;vertical-align:1px}
+  .plat-猎聘{background:var(--brand-weak);color:var(--brand)}
+  .plat-领英{background:var(--purple-weak);color:var(--purple)}
+  /* dashboard */
+  .stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:12px;margin-bottom:16px}
+  .stat{background:#fff;border:1px solid var(--line);border-radius:12px;padding:14px;text-align:center}
+  .stat .num{font-size:26px;font-weight:800}
+  .stat .lbl{color:var(--sub);font-size:12px}
+  .funnel{display:flex;flex-direction:column;gap:6px}
+  .fbar{display:flex;align-items:center;gap:8px}
+  .fbar .name{width:70px;text-align:right;color:var(--sub);font-size:12px;flex-shrink:0}
+  .fbar .track{flex:1;background:#eef0f3;border-radius:6px;height:22px;overflow:hidden}
+  .fbar .fill{height:100%;background:var(--brand);border-radius:6px;min-width:2px;transition:width .4s}
+  table.tbl{width:100%;border-collapse:collapse;background:#fff}
+  table.tbl th,table.tbl td{border-bottom:1px solid var(--line);padding:8px 10px;text-align:left;font-size:13px;vertical-align:top}
+  table.tbl th{color:var(--sub);font-weight:600;background:#fafbfc}
+  .toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:#1f2329;color:#fff;padding:10px 20px;border-radius:10px;font-size:14px;opacity:0;transition:opacity .3s;z-index:99;max-width:80vw}
+  .toast.show{opacity:.95}
+  .spin{display:inline-block;width:14px;height:14px;border:2px solid #fff;border-top-color:transparent;border-radius:50%;animation:r .8s linear infinite;vertical-align:-2px;margin-right:6px}
+  @keyframes r{to{transform:rotate(360deg)}}
+  .empty{color:var(--sub);text-align:center;padding:24px 0}
+  .refresh-info{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px}
+  .timeline{list-style:none}
+  .timeline li{padding:8px 0 8px 18px;border-left:2px solid var(--line);position:relative;margin-left:6px}
+  .timeline li::before{content:"";position:absolute;left:-5px;top:14px;width:8px;height:8px;border-radius:50%;background:var(--brand)}
+  .timeline .t{color:var(--sub);font-size:12px}
+</style>
+</head>
+<body>
+
+<!-- 登录视图 -->
+<div id="loginView" class="login-wrap" style="display:none">
+  <div class="login-card">
+    <h1>🎯 投递助手</h1>
+    <p class="muted" style="margin-bottom:20px">简历分析 · 岗位匹配 · 投递授权 · 跟踪仪表盘</p>
+    <button class="btn" id="loginBtn" style="width:100%;padding:12px">使用 WorkBuddy 登录</button>
+    <p id="loginError" style="color:var(--bad);font-size:13px;margin-top:12px"></p>
+    <p class="muted" style="margin-top:16px">数据仅本人可见，投递动作始终由你手动确认。</p>
+  </div>
+</div>
+
+<!-- 主应用 -->
+<div id="appView" style="display:none">
+  <header class="top">
+    <span class="logo">🎯 投递助手</span>
+    <nav class="tabs">
+      <button data-tab="profile" class="active">① 简历画像</button>
+      <button data-tab="pool">② 岗位池</button>
+      <button data-tab="confirm">③ 投递清单</button>
+      <button data-tab="dash">④ 跟踪仪表盘</button>
+    </nav>
+    <span class="row"><span class="muted" id="userName"></span> <button class="btn ghost small" id="logoutBtn">退出</button></span>
+  </header>
+  <main>
+
+    <!-- ① 简历画像 -->
+    <section id="tab-profile" class="tab-view active">
+      <div class="card">
+        <h2>第 1 步 · 上传/粘贴简历，AI 提炼核心竞争点与岗位画像</h2>
+        <p class="muted">支持直接粘贴简历文本，或上传 .txt 文件。分析结果将作为后续岗位匹配的依据。<b>安全提示：提交时会自动隐藏手机号、身份证号、银行卡号；家庭住址等敏感信息建议粘贴前自行删除。</b></p>
+        <div style="margin:10px 0"><input type="file" id="resumeFile" accept=".txt,.md,.markdown,.docx,.doc,.pdf,.jpg,.jpeg,.png,.webp,.bmp" style="padding:6px"><p class="muted" style="margin-top:6px">支持 Word（.docx）、PDF、Markdown/TXT、图片（JPG/PNG 等，自动 OCR 识别中文简历）；全部在浏览器本地解析，仅脱敏后的文字会参与分析。</p></div>
+        <textarea id="resumeText" rows="10" placeholder="在此粘贴简历全文……"></textarea>
+        <div class="row" style="margin-top:10px">
+          <button class="btn" id="analyzeBtn">🤖 AI 分析简历</button>
+          <span class="muted" id="analyzeHint"></span>
+        </div>
+      </div>
+      <div class="card" id="profileResult" style="display:none"></div>
+    </section>
+
+    <!-- ② 岗位池 -->
+    <section id="tab-pool" class="tab-view">
+      <div class="card">
+        <h2>第 2 步 · 手动导入岗位（书签 JSON / 粘贴 JD，自动识别）</h2>
+        <p class="muted">两种内容粘贴到同一个框，点一次「智能导入」即可：① 书签采集的内容（JSON 数组）→ 直接批量去重入库；② 复制的职位描述（JD）→ AI 解析出公司/岗位/薪资/地点后入库，多个 JD 用单独一行 <b>---</b> 分隔。想全自动可用上方「⚡ 通知 Agent 立即采集」。</p>
+        <div class="row" style="margin:8px 0">
+          <select id="jdPlatform" style="width:140px"><option value="猎聘">平台：猎聘</option><option value="领英">平台：领英</option></select>
+          <input id="jobUrl" placeholder="职位链接（可选，JD 模式生效，如 https://www.liepin.com/...）" style="flex:1;min-width:220px">
+        </div>
+        <textarea id="importText" rows="8" placeholder="粘贴书签采集的 JSON，或直接粘贴职位描述（JD）……&#10;【公司】XX科技&#10;【职位】高级前端工程师&#10;【薪资】25-35K·16薪&#10;【地点】深圳·南山区&#10;岗位职责：……&#10;任职要求：……"></textarea>
+        <div class="row" style="margin-top:10px">
+          <button class="btn" id="smartImportBtn">📥 智能导入（自动识别格式）</button>
+          <button class="btn ghost" id="matchBtn">🧮 按画像批量打分</button>
+          <button class="btn ghost" id="dedupeBtn">🧹 一键去重</button>
+          <span class="muted" id="poolHint"></span>
+        </div>
+      </div>
+      <div class="card">
+        <h2>⚡ 手动触发 Agent 自动采集（免等定时点）</h2>
+        <p class="muted">定时任务每天 8:00 / 18:00 自动「采集 + 打分」。两次之间若想立即找新岗位，点下面的按钮：系统向 Agent 发出采集请求，Agent 按你的当前画像执行一轮「猎聘 3 中文词 + 领英 3 英文词」采集、去重入库并自动打分，完成后给你发汇总消息。请求检查点每小时整点运行，平均等待约 30 分钟。</p>
+        <div class="row" style="margin-top:10px">
+          <button class="btn" id="triggerCollectBtn">⚡ 通知 Agent 立即采集</button>
+          <button class="btn ghost" id="collectLogBtn">📋 运行采集记录</button>
+          <span class="muted" id="triggerHint"></span>
+        </div>
+        <div id="collectLog" style="display:none;margin-top:10px"></div>
+      </div>
+      <div class="card">
+        <h2>岗位池 <span class="muted" id="poolCount"></span></h2>
+        <div id="poolList"></div>
+      </div>
+    </section>
+
+    <!-- ③ 投递清单 -->
+    <section id="tab-confirm" class="tab-view">
+      <nav class="subtabs">
+        <button data-sub="confirm-pending" class="active">最新岗位清单<span class="cnt" id="cntPending">0</span></button>
+        <button data-sub="confirm-done">已确认投递<span class="cnt" id="cntDone">0</span></button>
+        <button data-sub="confirm-skip">不投的岗位<span class="cnt" id="cntSkip">0</span></button>
+      </nav>
+      <div id="sub-confirm-pending" class="sub-view active">
+        <div class="card">
+          <h2>第 3 步 · 确认投递清单（公司 + 岗位 + JD 摘要 + 岗位预算 + 工作地点 + 岗位来源）</h2>
+          <p class="muted">本清单按匹配度从高到低倒序排列，仅显示尚未授权的岗位；你点击「授权投递」过的岗位会自动移入上方「已确认投递」页签。勾选你同意投递的岗位后点击「批量授权」，授权后请到对应平台（猎聘/领英，见「岗位来源」）完成投递，回来点击「已手动投递」，系统才会记录并开始跟踪。</p>
+          <div class="row" style="margin:10px 0">
+            <button class="btn" id="authBatchBtn">✅ 批量授权选中岗位</button>
+          </div>
+          <div id="confirmList"></div>
+        </div>
+      </div>
+      <div id="sub-confirm-done" class="sub-view">
+        <div class="card">
+          <h2>已确认投递（已授权，等你在对应平台完成手动投递）</h2>
+          <p class="muted">这里只显示你已点击「授权投递」的岗位，同样按匹配度倒序排列；投递完成后点「我已手动投递」，岗位进入第④步跟踪仪表盘。</p>
+          <div class="row" style="margin:10px 0">
+            <button class="btn ghost" id="sentBatchBtn">📮 批量标记「已手动投递」</button>
+          </div>
+          <div id="readyList"></div>
+        </div>
+      </div>
+      <div id="sub-confirm-skip" class="sub-view">
+        <div class="card">
+          <h2>不投的岗位（你已跳过，不再进入投递清单）</h2>
+          <p class="muted">这里显示你在「最新岗位清单」里点击「不投了」而跳过的岗位，按匹配度倒序排列；每条都保留了原始职位链接，方便你随时回看或反悔。如需重新投递，点击「↩ 移回待确认」即可回到最新岗位清单。</p>
+          <div class="row" style="margin:10px 0">
+            <button class="btn ghost" id="restoreBatchBtn">↩ 批量移回待确认</button>
+          </div>
+          <div id="skipList"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ④ 跟踪仪表盘 -->
+    <section id="tab-dash" class="tab-view">
+      <div class="refresh-info">
+        <h2>第 4 步 · 投递跟踪仪表盘</h2>
+        <span class="row">
+          <span class="muted" id="refreshCountdown"></span><span class="muted">（8:40/10:00/18:40/20:00 自动刷新 + 切回本页即时同步）</span>
+          <button class="btn ghost small" id="refreshNowBtn">立即刷新</button>
+        </span>
+      </div>
+      <div class="stats" id="statCards"></div>
+      <div class="card">
+        <h3>投递漏斗</h3>
+        <div class="funnel" id="funnel"></div>
+      </div>
+      <div class="grid2">
+        <div class="card">
+          <h3>面试邀请 <span class="muted" id="interviewCount"></span></h3>
+          <div id="interviewList"></div>
+        </div>
+        <div class="card">
+          <h3>最新动态</h3>
+          <ul class="timeline" id="eventList"></ul>
+        </div>
+      </div>
+      <div class="card">
+        <h3>全部岗位跟踪 · 更新进展状态</h3>
+        <div style="overflow-x:auto"><table class="tbl" id="trackTable"></table></div>
+      </div>
+    </section>
+
+  </main>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script src="https://cdn.jsdelivr.net/npm/@tencent-ai/workbuddy-cloud-sdk@dev/lib/index.global.js"></script>
+<script>
+/* ===== 云服务初始化（publicConfig 由云端环境注入）===== */
+const publicConfig = {
+  endpoint: 'https://job-apply-agent-36841.app.workbuddy.host',
+  oauthRelayBaseUrl: 'https://www.workbuddy.cn/v2/as/genie-baas/oauth',
+  publishableKey: 'wbpk_rzDA64OB3kPBpqyVfJTxnU_qvG6WCBWZvh0OfZQOnwReKhL1DF2Qhyd'
+};
+const cloud = WorkBuddyCloud.createWorkBuddyCloud({
+  endpoint: publicConfig.endpoint,
+  oauthRelayBaseUrl: publicConfig.oauthRelayBaseUrl,
+  publishableKey: publicConfig.publishableKey
+});
+
+const $ = (s) => document.querySelector(s);
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const STATUSES = ['待确认','待投递','已投递','已查看','已回复','面试邀请','不合适','已拒绝'];
+let session = null, modelId = null, autoTimer = null, countdownInt = null, nextRefreshAt = 0, curProfileId = null;
+
+function toast(msg, ms = 2600){ const t = $('#toast'); t.textContent = msg; t.classList.add('show'); clearTimeout(t._h); t._h = setTimeout(()=>t.classList.remove('show'), ms); }
+function hint(id, msg, loading){ $(id).innerHTML = (loading ? '<span class="spin"></span>' : '') + esc(msg); }
+
+/* ===== 登录（WorkBuddy 账号，含回调分发）===== */
+async function restoreAuth(){
+  const url = new URL(location.href);
+  if (!url.searchParams.has('code') && !url.searchParams.has('error')) { continueNormalStartup(); return; }
+  const provider = url.searchParams.get('provider');
+  if (provider !== 'workbuddy') { showLoginError('授权回调缺少有效的登录方式，请重新登录。'); return; }
+  const { data: sess, error } = await cloud.auth.handleWorkBuddyCallback.call(cloud.auth);
+  if (error) { showLoginError(error.message); return; }
+  if (sess) {
+    for (const k of ['code','state','provider']) url.searchParams.delete(k);
+    history.replaceState(null, '', `${url.pathname}${url.search}${url.hash}`);
+    enterApp(sess);
+  } else continueNormalStartup();
+}
+async function continueNormalStartup(){
+  const { data: sess, error } = await cloud.auth.getSession();
+  if (error || !sess) { showLogin(); return; }
+  enterApp(sess);
+}
+function showLogin(){ $('#loginView').style.display = 'flex'; $('#appView').style.display = 'none'; }
+function showLoginError(msg){ showLogin(); $('#loginError').textContent = msg; }
+function enterApp(sess){
+  session = sess;
+  $('#loginView').style.display = 'none'; $('#appView').style.display = 'block';
+  $('#userName').textContent = session.user?.name ? '👤 ' + session.user.name : '';
+  loadProfileView(); loadPool(); loadConfirm(); startAutoRefresh();
+  switchTab('profile');
+}
+$('#loginBtn').onclick = async () => {
+  $('#loginError').textContent = '';
+  const back = new URL(location.href); back.pathname = '/';
+  for (const k of ['code','state','provider']) back.searchParams.delete(k);
+  const { data, error } = await cloud.auth.signInWithOAuth({ provider: 'workbuddy', redirectTo: back.toString() });
+  if (error) { $('#loginError').textContent = error.message; return; }
+  location.assign(data.url);
+};
+$('#logoutBtn').onclick = async () => { await cloud.auth.signOut(); location.href = '/'; };
+function requireSession(){ if (!session) { showLogin(); throw new Error('请先登录'); } return session; }
+
+/* ===== Tab 切换 ===== */
+document.querySelectorAll('nav.tabs button').forEach(b => b.onclick = () => switchTab(b.dataset.tab));
+function switchTab(name){
+  document.querySelectorAll('nav.tabs button').forEach(b => b.classList.toggle('active', b.dataset.tab === name));
+  document.querySelectorAll('.tab-view').forEach(v => v.classList.remove('active'));
+  $('#tab-' + name).classList.add('active');
+  if (name === 'dash') loadDashboard();
+  if (name === 'confirm') loadConfirm();
+  if (name === 'pool') loadPool();
+}
+
+/* ===== 投递清单内分页签切换 ===== */
+document.querySelectorAll('nav.subtabs button').forEach(b => b.onclick = () => {
+  document.querySelectorAll('nav.subtabs button').forEach(x => x.classList.toggle('active', x === b));
+  document.querySelectorAll('#tab-confirm .sub-view').forEach(v => v.classList.remove('active'));
+  $('#sub-' + b.dataset.sub).classList.add('active');
+});
+
+/* ===== LLM 工具 ===== */
+async function ensureModel(){
+  if (modelId) return modelId;
+  const models = await cloud.llm.models.list();
+  const m = models.find(x => x.disabled !== true);
+  if (!m) throw new Error('当前应用未配置可用的大模型，请稍后再试。');
+  modelId = m.id; return modelId;
+}
+function withTimeout(promise, ms, msg){
+  return Promise.race([
+    promise,
+    new Promise((_, rej) => setTimeout(() => rej(new Error(msg || '请求超时，请重试')), ms))
+  ]);
+}
+async function llmJSON(system, user){
+  const model = await ensureModel();
+  const call = (async () => {
+    let answer = '';
+    for await (const chunk of cloud.llm.chat.completions.create({
+      model,
+      messages: [{ role:'system', content: system }, { role:'user', content: user }],
+      stream: true,
+      response_format: { type: 'json_object' },
+      temperature: 0.3
+    })) {
+      const d = chunk.choices[0]?.delta?.content;
+      if (d) answer += d;
+    }
+    return answer;
+  })();
+  const answer = await withTimeout(call, 120000, 'AI 响应超时（120秒未收到完整回复），请点击重试');
+  const cleaned = answer.replace(/^```(?:json)?/m,'').replace(/```$/m,'').trim();
+  try{ return JSON.parse(cleaned); }
+  catch(e){ throw new Error('AI 返回格式异常，请重试一次'); }
+}
+
+/* 敏感信息脱敏：身份证号 / 银行卡号 / 手机号（在发送给大模型与写入数据库之前执行） */
+function scrubPII(t){
+  return t
+    .replace(/\b\d{17}[\dXx]\b/g, '【身份证号已隐藏】')
+    .replace(/\b\d{16,19}\b/g, '【银行卡号已隐藏】')
+    .replace(/\b\d{15}\b/g, '【身份证号已隐藏】')
+    .replace(/\b1[3-9]\d{9}\b/g, '【手机号已隐藏】');
+}
+
+/* ===== ① 简历画像 ===== */
+function loadScript(src){
+  return new Promise((res, rej) => {
+    const s = document.createElement('script');
+    s.src = src; s.onload = res;
+    s.onerror = () => rej(new Error('解析组件加载失败，请检查网络后重试'));
+    document.head.appendChild(s);
+  });
+}
+async function extractResumeText(f){
+  const name = f.name.toLowerCase();
+  if (/\.(txt|md|markdown)$/.test(name)) return await f.text();
+  if (/\.doc$/.test(name)) throw new Error('旧版 .doc 无法在浏览器解析，请用 Word 另存为 .docx 后再上传');
+  if (/\.docx$/.test(name)) {
+    if (!window.mammoth) await loadScript('https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.6.0/mammoth.browser.min.js');
+    const r = await mammoth.extractRawText({ arrayBuffer: await f.arrayBuffer() });
+    return r.value || '';
+  }
+  if (/\.pdf$/.test(name)) {
+    if (!window.pdfjsLib) await loadScript('https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js');
+    pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+    const pdf = await pdfjsLib.getDocument({ data: await f.arrayBuffer() }).promise;
+    let out = '';
+    for (let i = 1; i <= pdf.numPages; i++) {
+      const page = await pdf.getPage(i);
+      const tc = await page.getTextContent();
+      out += tc.items.map(it => it.str).join(' ') + '\n';
+    }
+    return out;
+  }
+  if (/\.(jpg|jpeg|png|webp|bmp)$/.test(name)) {
+    if (!window.Tesseract) await loadScript('https://cdnjs.cloudflare.com/ajax/libs/tesseract.js/5.0.4/tesseract.min.js');
+    toast('图片 OCR 识别中，中文简历约需 20-60 秒…');
+    const { data } = await Tesseract.recognize(f, 'chi_sim', {
+      langPath: 'https://cdn.jsdelivr.net/npm/@tesseract.js-data/chi_sim@4.0.0_fast_int'
+    });
+    return data.text || '';
+  }
+  throw new Error('不支持的文件格式');
+}
+$('#resumeFile').addEventListener('change', async e => {
+  const f = e.target.files[0]; if (!f) return;
+  try{
+    toast('正在解析 ' + f.name + ' …');
+    const text = (await extractResumeText(f)).replace(/[ \t]+/g,' ').replace(/\n{3,}/g,'\n\n').trim();
+    if (text.length < 30) throw new Error('未能从文件中提取到有效文字（扫描版 PDF/模糊图片识别效果差，可改粘贴文字）');
+    $('#resumeText').value = text;
+    toast('已读取文件：' + f.name + '（' + text.length + ' 字）');
+  }catch(err){
+    toast('解析失败：' + (err.message||err));
+    e.target.value = '';
+  }
+});
+$('#analyzeBtn').onclick = async () => {
+  try{
+    const text = scrubPII($('#resumeText').value.trim());
+    if (text.length < 50) return toast('请先粘贴或上传简历内容（至少 50 字）');
+    requireSession();
+    $('#analyzeBtn').disabled = true; hint('#analyzeHint','AI 正在分析简历，请稍候…', true);
+    const result = await llmJSON(
+      '你是一位资深猎头与求职教练。请阅读用户简历，严格只输出一个 JSON 对象（不要任何多余文字），字段如下：' +
+      '{"competitiveness": ["核心工作竞争点，3-6条，每条一句话且有事实支撑"],' +
+      ' "target_profile": {"target_roles": ["适配的目标岗位名称"],"industries": ["适配行业"],"cities": ["适配城市"],"cities_en": ["适配城市的英文名，如 Shanghai, Beijing, Shenzhen, Hangzhou"],"salary_range": "合理薪资范围","seniority": "适合的职级"},"keywords": ["用于国内平台（猎聘）匹配的中文关键词，8-15个"],"keywords_en": ["用于领英（LinkedIn）匹配的英文关键词/职位名，5-10个，如 Product Manager, AI Product"],"greeting_template": "一句给猎聘打招呼用的话术模板，80字内"}',
+      '我的简历如下：\n' + text.slice(0, 8000)
+    );
+    await cloud.database.from('profiles').update({ is_active: false }).eq('owner_id', session.user.id).select();
+    await cloud.database.from('profiles').insert({
+      owner_name: session.user?.name ?? null,
+      resume_filename: $('#resumeFile').files[0]?.name || null,
+      resume_text: text.slice(0, 20000),
+      competitiveness: result.competitiveness ?? [],
+      target_profile: result.target_profile ?? {},
+      keywords: result.keywords ?? [],
+      keywords_en: result.keywords_en ?? [],
+      greeting_template: result.greeting_template ?? '',
+      is_active: true
+    }).select();
+    $('#resumeFile').value = '';
+    toast('✅ 简历分析完成，画像已保存并设为当前使用');
+    loadProfileView();
+  }catch(e){ toast('分析失败：' + (e.message || e)); }
+  finally{ $('#analyzeBtn').disabled = false; hint('#analyzeHint',''); }
+};
+async function loadProfileView(){
+  try{
+    requireSession();
+    const { data } = await cloud.database.from('profiles').select('*').eq('is_active', true).order('created_at', { ascending:false }).limit(1);
+    const box = $('#profileResult');
+    if (!data || !data.length){ box.style.display = 'none'; return; }
+    const p = data[0];
+    const tp = p.target_profile || {};
+    box.style.display = 'block';
+    box.innerHTML = `
+      <h2>当前岗位画像 <span class="muted">（保存于 ${esc((p.created_at||'').slice(0,10))}）</span> ${p.confirmed?'<span class="badge st-已投递">画像已确认</span>':'<span class="badge st-待确认">画像未确认</span>'}</h2>
+      <div class="profile-block"><b>💼 核心工作竞争点</b><ul style="margin:6px 0 0 18px">${(p.competitiveness||[]).map(c=>`<li>${esc(c)}</li>`).join('')}</ul></div>
+      <div class="profile-block"><b>🎯 投递岗位画像</b>
+        <div style="margin-top:6px">目标岗位：${(tp.target_roles||[]).map(r=>`<span class="tag">${esc(r)}</span>`).join('')}</div>
+        <div>行业：${(tp.industries||[]).map(r=>`<span class="tag">${esc(r)}</span>`).join('')}</div>
+        <div>城市：${(tp.cities||[]).map(r=>`<span class="tag">${esc(r)}</span>`).join('')}</div>
+        <div>薪资参考：<b>${esc(tp.salary_range||'-')}</b> ｜ 职级：<b>${esc(tp.seniority||'-')}</b></div>
+      </div>
+      <div class="profile-block"><b>🔑 匹配关键词（猎聘）</b><div style="margin-top:6px">${(p.keywords||[]).map(k=>`<span class="tag">${esc(k)}</span>`).join('')}</div></div>
+      <div class="profile-block"><b>🔑 匹配关键词（领英）</b><div style="margin-top:6px">${(p.keywords_en||[]).map(k=>`<span class="tag" style="background:var(--purple-weak);color:var(--purple)">${esc(k)}</span>`).join('') || '<span class="muted">旧画像无英文关键词，重新分析或对话调整一次即可生成</span>'}</div></div>
+      <div class="profile-block"><b>💬 打招呼话术模板</b><p style="margin-top:6px">${esc(p.greeting_template||'-')}</p></div>
+      <div class="profile-block">
+        <b>🧭 多轮对话调整画像</b>
+        <p class="muted" style="margin:4px 0">哪里不满意直接说，例如「薪资改成 30-45K」「排除外包公司」「更偏管理岗」，AI 会重写画像报告，改到你满意为止。</p>
+        <div id="chatLog" style="max-height:200px;overflow:auto;margin:8px 0"></div>
+        <div class="row">
+          <input id="chatInput" placeholder="输入你的修改意见…" style="flex:1;min-width:200px">
+          <button class="btn ghost" id="chatSendBtn">发送</button>
+          <button class="btn" id="confirmProfileBtn">${p.confirmed?'🔓 重新编辑画像':'✅ 满意，确认画像进入下一步'}</button>
+        </div>
+        <p class="muted" id="chatHint" style="margin-top:6px"></p>
+        <p class="muted" style="margin-top:8px">确认后进入第②步：按画像去猎聘/领英搜索在招岗位并采集
+          <a href="https://www.liepin.com/zhaopin/?key=${encodeURIComponent((p.keywords||[]).slice(0,3).join(' '))}" target="_blank" rel="noopener">🔎 猎聘搜索</a>
+          ｜ <a href="https://www.linkedin.com/jobs/search/?keywords=${encodeURIComponent((p.keywords_en||[]).slice(0,3).join(' '))}&location=${encodeURIComponent((tp.cities_en||[])[0] || 'Shanghai, China')}" target="_blank" rel="noopener">🔗 领英搜索（需代理+登录）</a></p>
+      </div>`;
+    curProfileId = p.id;
+    renderChat(p.chat_log || []);
+    $('#chatSendBtn').onclick = sendProfileChat;
+    $('#chatInput').addEventListener('keydown', e => { if (e.key === 'Enter') sendProfileChat(); });
+    $('#confirmProfileBtn').onclick = confirmProfile;
+  }catch(e){ /* 静默：未登录时由门卫处理 */ }
+}
+function renderChat(log){
+  const box = $('#chatLog'); if (!box) return;
+  box.innerHTML = log.map(m => `<div style="margin:4px 0"><span class="tag">${m.role==='user'?'我':'AI'}</span> ${esc(m.content)}</div>`).join('')
+    || '<div class="muted">暂无调整记录，直接输入你的第一条修改意见。</div>';
+  box.scrollTop = box.scrollHeight;
+}
+async function sendProfileChat(){
+  try{
+    requireSession();
+    const text = $('#chatInput').value.trim();
+    if (!text || !curProfileId) return;
+    const { data } = await cloud.database.from('profiles').select('*').eq('id', curProfileId).maybeSingle();
+    if (!data) return toast('画像不存在，请先完成简历分析');
+    const log = data.chat_log || [];
+    log.push({ role:'user', content:text });
+    $('#chatSendBtn').disabled = true;
+    $('#chatInput').disabled = true;
+    hint('#chatHint','AI 正在思考，通常 10-40 秒，最长等待 120 秒…', true);
+    const history = log.slice(-8).map(m => (m.role==='user'?'用户意见：':'你的回复：') + m.content).join('\n');
+    const r = await llmJSON(
+      '你是求职画像顾问。根据用户对当前画像提出的历次修改意见，输出完整的更新后画像。严格只输出 JSON：{"reply":"40字内说明本次调整了什么","competitiveness":["核心竞争点3-6条，有事实支撑"],"target_profile":{"target_roles":[],"industries":[],"cities":[],"cities_en":[],"salary_range":"","seniority":""},"keywords":["中文匹配关键词8-15个"],"keywords_en":["英文关键词5-10个，用于领英"],"greeting_template":"一句话打招呼话术"}。用户未提及修改的字段保持原值。',
+      '当前画像：' + JSON.stringify({competitiveness:data.competitiveness,target_profile:data.target_profile,keywords:data.keywords,keywords_en:data.keywords_en,greeting_template:data.greeting_template}) + '\n\n历史对话：\n' + history + '\n\n最新意见：' + text
+    );
+    log.push({ role:'assistant', content: r.reply || '已按你的意见更新画像' });
+    await cloud.database.from('profiles').update({
+      chat_log: log, confirmed: false,
+      competitiveness: r.competitiveness ?? data.competitiveness,
+      target_profile: r.target_profile ?? data.target_profile,
+      keywords: r.keywords ?? data.keywords,
+      keywords_en: r.keywords_en ?? data.keywords_en,
+      greeting_template: r.greeting_template ?? data.greeting_template
+    }).eq('id', curProfileId).select();
+    $('#chatInput').value = '';
+    toast('✅ 画像已按你的意见调整，请查看报告，满意后点「确认画像」');
+    loadProfileView();
+  }catch(e){ toast('调整失败：' + (e.message || e)); }
+  finally{
+    $('#chatSendBtn').disabled = false;
+    $('#chatInput').disabled = false;
+    hint('#chatHint','');
+  }
+}
+async function confirmProfile(){
+  try{
+    requireSession();
+    if (!curProfileId) return;
+    const { data } = await cloud.database.from('profiles').select('confirmed').eq('id', curProfileId).maybeSingle();
+    const next = !(data && data.confirmed);
+    await cloud.database.from('profiles').update({ confirmed: next }).eq('id', curProfileId).select();
+    toast(next ? '✅ 画像已确认，解锁「② 岗位池」匹配打分' : '已取消确认，可继续对话调整');
+    loadProfileView();
+  }catch(e){ toast('操作失败：' + (e.message||e)); }
+}
+
+/* ===== ② 岗位池 ===== */
+/* 去重规则：公司 + 岗位 规范化后比对（忽略「招聘/诚聘」前缀、空格、标点、全半角差异），
+   同一岗位重复采集多次只保留一条，避免同一岗位反复出现在清单里。 */
+const STATUS_RANK = {'已投递':0,'面试中':1,'已查看':2,'待投递':3,'待确认':4,'不合适':5};
+function normTxt(s){
+  return String(s||'')
+    .replace(/[\uff01-\uff5e]/g, ch => String.fromCharCode(ch.charCodeAt(0)-0xfee0)) // 全角转半角
+    .replace(/招聘|诚聘|急招|热招|岗位名称|职位名称|岗位|职位/g,'')
+    .replace(/[\s\u3000]/g,'')
+    .replace(/[（）()【】\[\]{}<>·,，.。、\/\\|\-—_~!！?？:：;；'"“”‘’+*&#@]/g,'')
+    .toLowerCase();
+}
+function dupKey(j){ return normTxt(j.company) + '|' + normTxt(j.position); }
+function bestFirst(a,b){
+  const ra = STATUS_RANK[a.status] ?? 9, rb = STATUS_RANK[b.status] ?? 9;
+  if (ra !== rb) return ra - rb;
+  const sa = a.match_score ?? -1, sb = b.match_score ?? -1;
+  if (sa !== sb) return sb - sa;
+  if (!!b.source_url !== !!a.source_url) return (b.source_url?1:0) - (a.source_url?1:0);
+  return (a.id||0) - (b.id||0);
+}
+/* 列表层去重：返回 {list, hidden}，list 为每组保留的最优一条 */
+function dedupeList(list){
+  const map = new Map();
+  (list||[]).forEach(j => {
+    const k = dupKey(j);
+    if (!map.has(k)) map.set(k, []);
+    map.get(k).push(j);
+  });
+  const out = [];
+  let hidden = 0;
+  map.forEach(g => { g.sort(bestFirst); out.push(g[0]); hidden += g.length - 1; });
+  out.sort(bestFirst);
+  return { list: out, hidden };
+}
+$('#smartImportBtn').onclick = async () => {
+  try{
+    requireSession();
+    const raw = $('#importText').value.trim();
+    if (!raw) return toast('请先粘贴书签采集内容（JSON）或职位描述（JD）');
+    $('#smartImportBtn').disabled = true;
+    let arr = null;
+    try{
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) arr = parsed;
+      else if (parsed && typeof parsed === 'object') arr = [parsed];
+    }catch{}
+    if (arr && arr.length && arr.some(x => x && (x.company || x.title || x.position))){
+      hint('#poolHint','识别为书签 JSON，正在批量导入去重…', true);
+      arr = arr.slice(0, 60);
+      const { data: exist } = await cloud.database.from('jobs').select('company,position,source_url,platform').limit(500);
+      const key = j => dupKey(j);
+      const urlKey = u => String(u||'').trim().replace(/[?#].*$/,'').toLowerCase();
+      const seen = new Set((exist||[]).map(key));
+      const seenUrl = new Set((exist||[]).map(j=>urlKey(j.source_url)).filter(Boolean));
+      let ok = 0, dup = 0;
+      for (const it of arr){
+        const company = String(it.company||'未提及').trim();
+        const position = String(it.title||it.position||'未提及').trim();
+        const link = String(it.link||it.url||it.source_url||'').trim();
+        const platform = String(it.platform || (/linkedin\.com/i.test(link) ? '领英' : '猎聘')).trim();
+        if (!company && !position) continue;
+        const k = key({company, position});
+        const uk = urlKey(link);
+        if (seen.has(k) || (uk && seenUrl.has(uk))) { dup++; continue; }
+        seen.add(k);
+        if (uk) seenUrl.add(uk);
+        await cloud.database.from('jobs').insert({
+          owner_name: session.user?.name ?? null,
+          company, position,
+          jd_summary: String(it.tags||it.desc||'').trim().slice(0,300) || '书签采集：详情见职位链接',
+          salary: String(it.salary||'面议').trim(),
+          location: String(it.location||'未提及').trim(),
+          source_url: link || null,
+          platform,
+          status: '待确认'
+        }).select();
+        ok++;
+      }
+      $('#importText').value = '';
+      toast(`✅ 导入 ${ok} 个新岗位` + (dup ? `，跳过重复 ${dup} 个` : ''));
+      loadPool();
+    } else {
+      if (raw.length < 20) return toast('内容太短：请粘贴书签 JSON 或完整 JD');
+      hint('#poolHint','识别为 JD 文本，AI 正在解析…', true);
+      const chunks = raw.split(/\n\s*---\s*\n/).map(s=>s.trim()).filter(s=>s.length>20).slice(0,10);
+      const url = $('#jobUrl').value.trim() || null;
+      const { data: exist2 } = await cloud.database.from('jobs').select('company,position,source_url').limit(500);
+      const seen2 = new Set((exist2||[]).map(j=>dupKey(j)));
+      const urlKey2 = u => String(u||'').trim().replace(/[?#].*$/,'').toLowerCase();
+      const seenUrl2 = new Set((exist2||[]).map(j=>urlKey2(j.source_url)).filter(Boolean));
+      let ok = 0, dup2 = 0;
+      for (const chunk of chunks){
+        const j = await llmJSON(
+          '你是招聘信息解析器。从用户提供的职位描述中提取信息，严格只输出 JSON：{"company":"公司名(未提及则写 未提及)","position":"岗位名称","jd_summary":"80字以内的JD核心摘要，突出关键职责与硬性要求","salary":"薪资/岗位预算，如 25-35K·16薪，未提及写 面议","location":"工作地点，未提及写 未提及"}',
+          chunk.slice(0, 4000)
+        );
+        if (j.company === '未提及' && j.position === '未提及') continue;
+        const k2 = dupKey({company:j.company, position:j.position});
+        const uk2 = urlKey2(url);
+        if (seen2.has(k2) || (uk2 && seenUrl2.has(uk2))) { dup2++; continue; }
+        seen2.add(k2);
+        if (uk2) seenUrl2.add(uk2);
+        await cloud.database.from('jobs').insert({
+          owner_name: session.user?.name ?? null,
+          company: j.company, position: j.position,
+          jd_summary: j.jd_summary, salary: j.salary, location: j.location,
+          source_url: url, jd_text: chunk.slice(0, 8000),
+          platform: $('#jdPlatform').value,
+          status: '待确认'
+        }).select();
+        ok++;
+      }
+      $('#importText').value = '';
+      toast(ok ? `✅ 已解析入库 ${ok} 个岗位` + (dup2 ? `，跳过重复 ${dup2} 个` : '') : (dup2 ? `这 ${dup2} 个岗位都已在池中，无需重复导入` : '未解析出有效岗位，请检查粘贴内容'));
+      loadPool();
+    }
+  }catch(e){ toast('导入失败：' + (e.message || e)); }
+  finally{ $('#smartImportBtn').disabled = false; hint('#poolHint',''); }
+};
+/* 一键去重：把库里已有重复岗位真正删掉（保留每组最优一条），并把事件记录迁移到保留项 */
+$('#dedupeBtn').onclick = async () => {
+  try{
+    requireSession();
+    $('#dedupeBtn').disabled = true; hint('#poolHint','正在扫描重复岗位…', true);
+    const { data } = await cloud.database.from('jobs').select('*').limit(1000);
+    const map = new Map();
+    (data||[]).forEach(j => { const k = dupKey(j); if (!map.has(k)) map.set(k, []); map.get(k).push(j); });
+    const groups = [...map.values()].filter(g => g.length > 1);
+    const total = groups.reduce((s,g)=>s+g.length-1, 0);
+    if (!total) return toast('✅ 没有发现重复岗位，库很干净');
+    const sample = groups.slice(0,5).map(g=>{ g.sort(bestFirst); return `· ${g[0].company} · ${g[0].position}（${g.length} 条 → 保留 1 条）`; }).join('\n');
+    if (!confirm(`发现 ${groups.length} 组共 ${total} 条重复岗位：\n\n${sample}${groups.length>5?'\n…':''}\n\n每组保留「进度最靠前 + 匹配度最高 + 有链接」的那一条，其余删除。确认清理？`)) return;
+    let moved = 0, removed = 0;
+    for (const g of groups){
+      g.sort(bestFirst);
+      const keep = g[0];
+      for (const j of g.slice(1)){
+        const { data: evs } = await cloud.database.from('job_events').select('*').eq('job_id', j.id);
+        if (evs?.length){
+          await cloud.database.from('job_events').update({ job_id: keep.id }).eq('job_id', j.id).select();
+          moved += evs.length;
+        }
+        await cloud.database.from('jobs').delete().eq('id', j.id).select();
+        removed++;
+      }
+    }
+    toast(`🧹 已清理 ${removed} 条重复岗位` + (moved?`，迁移 ${moved} 条事件记录`:''));
+    loadPool(); loadConfirm(); loadDashboard?.();
+  }catch(e){ toast('去重失败：' + (e.message||e)); }
+  finally{ $('#dedupeBtn').disabled = false; hint('#poolHint',''); }
+};
+$('#matchBtn').onclick = async () => {
+  try{
+    requireSession();
+    const { data: profs } = await cloud.database.from('profiles').select('*').eq('is_active', true).eq('confirmed', true).limit(1);
+    if (!profs?.length) return toast('请先在「① 简历画像」多轮调整并点击「确认画像」后，再来打分');
+    const { data: pendRaw } = await cloud.database.from('jobs').select('*').eq('status','待确认').limit(200);
+    if (!pendRaw?.length) return toast('岗位池中没有待确认的岗位');
+    const pend = dedupeList(pendRaw).list.slice(0,20); // 打分前先折叠重复，避免同一岗位重复消耗 tokens
+    $('#matchBtn').disabled = true; hint('#poolHint','AI 正在按画像匹配打分…', true);
+    const p = profs[0];
+    const listTxt = pend.map((j,i)=>`${i+1}. 公司:${j.company}｜岗位:${j.position}｜薪资:${j.salary||'未知'}｜地点:${j.location||'未知'}｜摘要:${j.jd_summary||''}`).join('\n');
+    const r = await llmJSON(
+      '你是岗位匹配评估器，采用 JEV 结构化匹配方法论：将候选人画像与岗位逐维度对照，只依据画像中真实存在的经历/技能证据打分，禁止虚构或脑补。权重：核心技能与岗位要求匹配 35%；行业/业务领域 15%；职级与经验年限 20%；薪资与地点可行性 15%；与目标岗位方向的发展契合度 15%。画像证据不足的维度按保守中间分计，硬性冲突（城市/职级/行业完全不符）直接低分。严格只输出 JSON：{"results":[{"index":1,"score":85,"reason":"≤30字：得分主依据+最大缺口"}]}',
+      '候选人画像：目标岗位=' + JSON.stringify(p.target_profile||{}) + '；关键词=' + JSON.stringify(p.keywords||[]) + '；核心竞争点=' + JSON.stringify(p.competitiveness||[]) +
+      '\n\n岗位列表：\n' + listTxt
+    );
+    for (const item of (r.results||[])){
+      const job = pend[item.index - 1];
+      if (!job || typeof item.score !== 'number') continue;
+      await cloud.database.from('jobs').update({ match_score: Math.max(0, Math.min(100, item.score)), match_reason: String(item.reason||'') }).eq('id', job.id).select();
+    }
+    toast('✅ 打分完成，按匹配度排序见下方列表');
+    loadPool();
+  }catch(e){ toast('打分失败：' + (e.message || e)); }
+  finally{ $('#matchBtn').disabled = false; hint('#poolHint',''); }
+};
+$('#collectLogBtn').onclick = async () => {
+  const box = $('#collectLog');
+  if (box.style.display !== 'none'){ box.style.display = 'none'; return; }
+  try{
+    requireSession();
+    box.style.display = 'block';
+    box.innerHTML = '<span class="muted">加载中…</span>';
+    const { data } = await cloud.database.from('agent_tasks').select('*').order('requested_at',{ascending:false}).limit(20);
+    const rows = data || [];
+    const stBadge = t => t.status === 'done'
+      ? '<span style="background:#EAF3DE;color:#3B6D11;padding:2px 8px;border-radius:10px;font-size:12px">已完成</span>'
+      : t.status === 'processing'
+      ? '<span style="background:#E6F1FB;color:#185FA5;padding:2px 8px;border-radius:10px;font-size:12px">进行中</span>'
+      : t.status === 'failed'
+      ? '<span style="background:#FCEBEB;color:#A32D2D;padding:2px 8px;border-radius:10px;font-size:12px">已失败</span>'
+      : '<span style="background:#F1EFE8;color:#5F5E5A;padding:2px 8px;border-radius:10px;font-size:12px">已合并（重复点击）</span>';
+    const fmt = t => {
+      const s = new Date(t.requested_at);
+      const pad = n => String(n).padStart(2,'0');
+      const start = `${pad(s.getMonth()+1)}-${pad(s.getDate())} ${pad(s.getHours())}:${pad(s.getMinutes())}`;
+      let end = '';
+      if (t.processed_at){ const e = new Date(t.processed_at); end = ` → ${pad(e.getHours())}:${pad(e.getMinutes())} 完成`; }
+      return start + end;
+    };
+    box.innerHTML = '<div class="muted" style="margin-bottom:4px">最近 20 次采集运行（含每天 8:00/18:00 定时任务与手动触发；进行中的记录结束后再打开可看到结果）</div>'
+      + (rows.length ? rows.map(t => `<div style="padding:8px 0;border-bottom:1px solid #eee">
+        ${stBadge(t)} <b>${t.type === 'collect_now' ? '手动触发' : '定时采集'}</b>
+        <span class="muted" style="margin-left:6px">${fmt(t)}</span>
+        ${t.status === 'failed' && t.note ? `<div style="color:#A32D2D;font-size:12px;margin-top:2px">失败原因：${esc(t.note)}</div>` : (t.note ? `<span class="muted" style="font-size:12px;margin-left:6px">${esc(t.note)}</span>` : '')}
+      </div>`).join('') : '<div class="empty">暂无运行记录：定时任务每次运行会自动登记，手动触发后也会登记</div>');
+  }catch(e){ box.innerHTML = '<span class="muted">加载失败：' + esc(e.message || e) + '</span>'; }
+};
+$('#triggerCollectBtn').onclick = async () => {
+  try{
+    requireSession();
+    if (!curProfileId) return toast('请先完成①画像确认，Agent 才知道按什么关键词采集');
+    $('#triggerCollectBtn').disabled = true; hint('#triggerHint','正在写入采集请求…', true);
+    await cloud.database.from('agent_tasks').insert({
+      owner_name: session.user?.name ?? null,
+      type: 'collect_now', status: 'pending',
+      note: '用户在应用中手动触发'
+    }).select();
+    hint('#triggerHint','✅ 请求已排队：Agent 每小时整点检查一次（平均约 30 分钟内执行），完成后给你发汇总消息');
+    toast('✅ 采集请求已发出，Agent 执行完会通知你');
+  }catch(e){ toast('触发失败：' + (e.message || e)); }
+  finally{ $('#triggerCollectBtn').disabled = false; }
+};
+async function loadPool(){
+  try{
+    requireSession();
+    const { data } = await cloud.database.from('jobs').select('*').order('created_at',{ascending:false}).limit(500);
+    const rawPool = (data||[]).filter(j => j.status === '待确认');
+    const { list: pool, hidden } = dedupeList(rawPool);
+    pool.sort((a,b)=>(b.match_score??-1)-(a.match_score??-1));
+    $('#poolCount').innerHTML = `（待确认 ${pool.length} 个）` + (hidden ? ` <span class="muted">· 已折叠 ${hidden} 条重复</span>` : '');
+    $('#poolList').innerHTML = pool.length ? pool.map(jobCard).join('') : '<div class="empty">岗位池为空，先去粘贴几个猎聘职位描述吧 👆</div>';
+    document.querySelectorAll('[data-del]').forEach(b => b.onclick = () => delJob(b.dataset.del));
+  }catch(e){}
+}
+function jobCard(j){
+  const score = j.match_score != null ? `<span class="score">匹配度 ${j.match_score}</span>` : '<span class="muted">未打分</span>';
+  return `<div class="job">
+    <div class="head"><span><span class="plat plat-${esc(j.platform||'猎聘')}">${esc(j.platform||'猎聘')}</span> <span class="company">${esc(j.company)}</span> · <span class="pos">${esc(j.position)}</span></span><span>${score} <span class="badge st-${esc(j.status)}">${esc(j.status)}</span></span></div>
+    <div class="meta"><span>💰 ${esc(j.salary||'面议')}</span><span>📍 ${esc(j.location||'未提及')}</span>${j.match_reason?`<span>🧮 ${esc(j.match_reason)}</span>`:''}</div>
+    <div class="summary">${esc(j.jd_summary||'')}</div>
+    <div class="row">${j.source_url?`<a class="muted" href="${esc(j.source_url)}" target="_blank" rel="noopener">🔗 打开职位链接</a>`:''}<button class="btn danger small" data-del="${j.id}">删除</button></div>
+  </div>`;
+}
+async function delJob(id){
+  if (!confirm('确定删除该岗位记录？')) return;
+  await cloud.database.from('jobs').delete().eq('id', id).select();
+  await cloud.database.from('job_events').delete().eq('job_id', id).select();
+  loadPool(); loadConfirm();
+}
+
+/* ===== ③ 投递清单 ===== */
+async function loadConfirm(){
+  try{
+    requireSession();
+    const { data } = await cloud.database.from('jobs').select('*').order('match_score',{ascending:false}).limit(200);
+    const all = data||[];
+    const pending = dedupeList(all.filter(j=>j.status==='待确认')).list.sort((a,b)=>(b.match_score??-1)-(a.match_score??-1));
+    const ready = dedupeList(all.filter(j=>j.status==='待投递')).list.sort((a,b)=>(b.match_score??-1)-(a.match_score??-1));
+    const skipped = dedupeList(all.filter(j=>j.status==='不合适')).list.sort((a,b)=>(b.match_score??-1)-(a.match_score??-1));
+    $('#cntPending').textContent = pending.length;
+    $('#cntDone').textContent = ready.length;
+    $('#cntSkip').textContent = skipped.length;
+    $('#confirmList').innerHTML = pending.length ? pending.map(j=>`
+      <div class="job">
+        <div class="head"><span><label><input type="checkbox" class="pick" value="${j.id}"><span class="plat plat-${esc(j.platform||'猎聘')}">${esc(j.platform||'猎聘')}</span> <span class="company">${esc(j.company)}</span> + <span class="pos">${esc(j.position)}</span></label></span>
+        <span>${j.match_score!=null?`<span class="score">匹配度 ${j.match_score}</span>`:''} <span class="badge st-待确认">待确认</span></span></div>
+        <div class="meta"><span>💰 岗位预算：${esc(j.salary||'面议')}</span><span>📍 工作地点：${esc(j.location||'未提及')}</span><span>🏷️ 岗位来源：<b>${esc(j.platform||'猎聘')}</b></span>${j.source_url?`<span>🔗 <a href="${esc(j.source_url)}" target="_blank" rel="noopener" style="color:var(--brand)">打开职位详情页</a></span>`:'<span class="muted">🔗 暂无链接，可凭公司+岗位名到对应平台搜索</span>'}${j.match_reason?`<span>🧮 ${esc(j.match_reason)}</span>`:''}</div>
+        <div class="summary">📄 JD摘要：${esc(j.jd_summary||'')}</div>
+        <div class="row">
+          <button class="btn small" data-auth="${j.id}">✅ 授权投递</button>
+          ${j.source_url?`<a class="btn ghost small" href="${esc(j.source_url)}" target="_blank" rel="noopener" style="text-decoration:none">🔗 打开职位页</a>`:''}
+          <button class="btn danger small" data-skip="${j.id}">✕ 不投了</button>
+        </div>
+      </div>`).join('') : '<div class="empty">没有待确认的岗位。去「② 岗位池」导入并打分吧。</div>';
+    $('#readyList').innerHTML = ready.length ? ready.map(j=>`
+      <div class="job">
+        <div class="head"><span><span class="plat plat-${esc(j.platform||'猎聘')}">${esc(j.platform||'猎聘')}</span> <span class="company">${esc(j.company)}</span> · <span class="pos">${esc(j.position)}</span></span><span class="badge st-待投递">已授权 · 待投递</span></div>
+        <div class="meta"><span>💰 ${esc(j.salary||'面议')}</span><span>📍 ${esc(j.location||'未提及')}</span><span>🏷️ 来源：${esc(j.platform||'猎聘')}</span>${j.source_url?`<span>🔗 <a href="${esc(j.source_url)}" target="_blank" rel="noopener" style="color:var(--brand)">投递网页链接</a></span>`:'<span class="muted">🔗 暂无链接</span>'}</div>
+        <div class="summary">${esc(j.jd_summary||'')}</div>
+        <div class="row">
+          ${j.source_url?`<a class="btn small" href="${esc(j.source_url)}" target="_blank" rel="noopener" style="text-decoration:none">🔗 去${esc(j.platform||'猎聘')}投递</a>`:''}
+          <button class="btn ghost small" data-sent="${j.id}">📮 我已手动投递</button>
+        </div>
+      </div>`).join('') : '<div class="empty">暂无待投递岗位。授权后这里会出现你的投递任务。</div>';
+    $('#skipList').innerHTML = skipped.length ? skipped.map(j=>`
+      <div class="job">
+        <div class="head"><span><label><input type="checkbox" class="pickSkip" value="${j.id}"><span class="plat plat-${esc(j.platform||'猎聘')}">${esc(j.platform||'猎聘')}</span> <span class="company">${esc(j.company)}</span> · <span class="pos">${esc(j.position)}</span></label></span>
+        <span>${j.match_score!=null?`<span class="score">匹配度 ${j.match_score}</span>`:''} <span class="badge st-不合适">不投</span></span></div>
+        <div class="meta"><span>💰 岗位预算：${esc(j.salary||'面议')}</span><span>📍 工作地点：${esc(j.location||'未提及')}</span><span>🏷️ 岗位来源：<b>${esc(j.platform||'猎聘')}</b></span>${j.source_url?`<span>🔗 <a href="${esc(j.source_url)}" target="_blank" rel="noopener" style="color:var(--brand)">打开职位详情页</a></span>`:'<span class="muted">🔗 暂无链接，可凭公司+岗位名到对应平台搜索</span>'}${j.match_reason?`<span>🧮 ${esc(j.match_reason)}</span>`:''}</div>
+        <div class="summary">📄 JD摘要：${esc(j.jd_summary||'')}</div>
+        <div class="row">
+          ${j.source_url?`<a class="btn ghost small" href="${esc(j.source_url)}" target="_blank" rel="noopener" style="text-decoration:none">🔗 打开职位页</a>`:''}
+          <button class="btn small" data-restore="${j.id}">↩ 移回待确认</button>
+        </div>
+      </div>`).join('') : '<div class="empty">暂无跳过的岗位。在「最新岗位清单」里点「不投了」的岗位会出现在这里。</div>';
+    document.querySelectorAll('[data-auth]').forEach(b => b.onclick = () => authorize(b.dataset.auth));
+    document.querySelectorAll('[data-skip]').forEach(b => b.onclick = () => skipJob(b.dataset.skip));
+    document.querySelectorAll('[data-sent]').forEach(b => b.onclick = () => markSent(b.dataset.sent));
+    document.querySelectorAll('[data-restore]').forEach(b => b.onclick = () => restoreJob(b.dataset.restore));
+  }catch(e){}
+}
+async function logEvent(jobId, type, note){
+  await cloud.database.from('job_events').insert({ owner_name: session.user?.name ?? null, job_id: Number(jobId), event_type: type, note: note||null }).select();
+}
+async function authorize(id){
+  try{
+    requireSession();
+    const r = await cloud.database.from('jobs').update({ status:'待投递', updated_at:new Date().toISOString() }).eq('id', id).select();
+    if (!Array.isArray(r.data) || !r.data.length) return toast('操作失败：该记录可能已被删除');
+    const job = r.data[0];
+    await logEvent(id, '授权投递', '你手动确认授权，简历将投递至该岗位');
+    if (job.source_url) window.open(job.source_url, '_blank');
+    toast(`✅ 已授权「${job.company} · ${job.position}」，请到${job.platform||'猎聘'}完成投递后回来点击「已手动投递」`);
+    loadConfirm(); loadPool();
+  }catch(e){ toast('授权失败：' + (e.message||e)); }
+}
+async function skipJob(id){
+  await cloud.database.from('jobs').update({ status:'不合适', updated_at:new Date().toISOString() }).eq('id', id).select();
+  await logEvent(id, '放弃投递', '你在确认清单中选择了不投递');
+  loadConfirm(); loadPool();
+}
+async function restoreJob(id){
+  try{
+    requireSession();
+    const r = await cloud.database.from('jobs').update({ status:'待确认', updated_at:new Date().toISOString() }).eq('id', id).select();
+    if (!Array.isArray(r.data) || !r.data.length) return toast('操作失败：该记录可能已被删除');
+    await logEvent(id, '恢复待确认', '你从不投清单将岗位移回待确认');
+    toast('↩ 已移回「最新岗位清单」');
+    loadConfirm(); loadPool();
+  }catch(e){ toast('操作失败：' + (e.message||e)); }
+}
+async function markSent(id){
+  try{
+    requireSession();
+    const r = await cloud.database.from('jobs').update({ status:'已投递', updated_at:new Date().toISOString() }).eq('id', id).select();
+    if (!Array.isArray(r.data) || !r.data.length) return toast('操作失败');
+    await logEvent(id, '已投递', '你在猎聘上手动完成投递，开始跟踪');
+    toast('📮 已记录投递，可在「④ 跟踪仪表盘」查看进展');
+    loadConfirm(); loadPool();
+  }catch(e){ toast('记录失败：' + (e.message||e)); }
+}
+$('#restoreBatchBtn').onclick = async () => {
+  const ids = [...document.querySelectorAll('.pickSkip:checked')].map(c=>c.value);
+  if (!ids.length) return toast('请先勾选要移回的岗位');
+  if (!confirm(`确认把选中的 ${ids.length} 个岗位移回「最新岗位清单」？`)) return;
+  for (const id of ids) await restoreJob(id);
+};
+$('#authBatchBtn').onclick = async () => {
+  const ids = [...document.querySelectorAll('.pick:checked')].map(c=>c.value);
+  if (!ids.length) return toast('请先勾选要授权的岗位');
+  if (!confirm(`确认授权投递选中的 ${ids.length} 个岗位？（投递动作仍需你在猎聘上手动完成）`)) return;
+  for (const id of ids) await authorize(id);
+};
+$('#sentBatchBtn').onclick = async () => {
+  try{
+    requireSession();
+    const { data } = await cloud.database.from('jobs').select('*').eq('status','待投递');
+    const ready = (data||[]);
+    if (!ready.length) return toast('没有待投递的岗位');
+    if (!confirm(`确认你已在对应平台（猎聘/领英）手动投递了全部 ${ready.length} 个待投递岗位？`)) return;
+    for (const j of ready){
+      await cloud.database.from('jobs').update({ status:'已投递', updated_at:new Date().toISOString() }).eq('id', j.id).select();
+      await logEvent(j.id, '已投递', '批量确认已在猎聘完成投递');
+    }
+    toast('📮 已批量记录投递'); loadConfirm(); loadPool();
+  }catch(e){ toast('操作失败：' + (e.message||e)); }
+};
+
+/* ===== ④ 跟踪仪表盘（对齐数据写入时刻自动刷新 + 切回页面即时同步）===== */
+/* 数据库每天仅写 4 次：8:00/18:00 采集+打分、9:30/19:30 反馈跟踪，故在每次写入完成后各刷新一次 */
+const REFRESH_TIMES = ['08:40','10:00','18:40','20:00'];
+function nextRefreshTime(d = new Date()){
+  for (const t of REFRESH_TIMES){
+    const [h,m] = t.split(':').map(Number);
+    const cand = new Date(d); cand.setHours(h,m,0,0);
+    if (cand > d) return cand;
+  }
+  const [h,m] = REFRESH_TIMES[0].split(':').map(Number);
+  const cand = new Date(d); cand.setDate(cand.getDate()+1); cand.setHours(h,m,0,0);
+  return cand;
+}
+function scheduleNext(){ nextRefreshAt = nextRefreshTime().getTime(); }
+function startAutoRefresh(){
+  clearInterval(autoTimer); clearInterval(countdownInt);
+  scheduleNext();
+  autoTimer = setInterval(()=>{
+    if (Date.now() >= nextRefreshAt){ loadDashboard(); scheduleNext(); }
+  }, 30000);
+  countdownInt = setInterval(()=>{
+    const left = Math.max(0, nextRefreshAt - Date.now());
+    const t = nextRefreshTime();
+    const hm = `${String(t.getHours()).padStart(2,'0')}:${String(t.getMinutes()).padStart(2,'0')}`;
+    const hrs = Math.floor(left/3600000), mins = Math.floor(left%3600000/60000), secs = Math.floor(left%60000/1000);
+    $('#refreshCountdown').textContent = `⏱ 下次自动刷新 ${hm}（${hrs>0?hrs+'小时':''}${mins}分${secs}秒后）· 切回本页即自动同步`;
+  }, 1000);
+}
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden){ loadDashboard(); scheduleNext(); }
+});
+$('#refreshNowBtn').onclick = () => { loadDashboard(); scheduleNext(); toast('已刷新'); };
+async function loadDashboard(){
+  try{
+    requireSession();
+    const { data: jobs } = await cloud.database.from('jobs').select('*').order('updated_at',{ascending:false}).limit(500);
+    const { data: events } = await cloud.database.from('job_events').select('*').order('created_at',{ascending:false}).limit(30);
+    const all = jobs||[];
+    const cnt = {}; STATUSES.forEach(s=>cnt[s]=0); all.forEach(j=>{ cnt[j.status]=(cnt[j.status]||0)+1; });
+    const tracked = cnt['待投递']+cnt['已投递']+cnt['已查看']+cnt['已回复']+cnt['面试邀请'];
+    $('#statCards').innerHTML = [
+      ['岗位总数', all.length], ['待确认', cnt['待确认']], ['待投递', cnt['待投递']], ['已投递', cnt['已投递']],
+      ['已查看/回复', cnt['已查看']+cnt['已回复']], ['面试邀请', cnt['面试邀请']], ['回复率', tracked?Math.round((cnt['已查看']+cnt['已回复']+cnt['面试邀请'])/tracked*100)+'%':'-'],
+      ['猎聘岗位', all.filter(j=>(j.platform||'猎聘')==='猎聘').length], ['领英岗位', all.filter(j=>j.platform==='领英').length]
+    ].map(([l,n])=>`<div class="stat"><div class="num">${n}</div><div class="lbl">${l}</div></div>`).join('');
+    const max = Math.max(1, ...Object.values(cnt));
+    $('#funnel').innerHTML = STATUSES.map(s=>`
+      <div class="fbar"><span class="name">${s}</span><div class="track"><div class="fill" style="width:${cnt[s]/max*100}%"></div></div><b style="min-width:24px">${cnt[s]}</b></div>`).join('');
+    const ivs = all.filter(j=>j.status==='面试邀请');
+    $('#interviewCount').textContent = `（${ivs.length}）`;
+    $('#interviewList').innerHTML = ivs.length ? ivs.map(j=>`
+      <div class="job"><div class="head"><span><span class="company">${esc(j.company)}</span> · <span class="pos">${esc(j.position)}</span></span></div>
+      <div class="meta"><span>📍 ${esc(j.location||'')}</span><span class="muted">投递时间：${esc((j.updated_at||'').slice(0,16).replace('T',' '))}</span></div></div>`).join('')
+      : '<div class="empty">暂无面试邀请，继续加油 🚀</div>';
+    $('#eventList').innerHTML = (events&&events.length) ? events.map(ev=>{
+      const j = all.find(x=>x.id===ev.job_id);
+      return `<li><div><b>${esc(ev.event_type)}</b>${j?` · ${esc(j.company)} ${esc(j.position)}`:''}</div>${ev.note?`<div class="muted">${esc(ev.note)}</div>`:''}<div class="t">${esc((ev.created_at||'').slice(0,16).replace('T',' '))}</div></li>`;
+    }).join('') : '<div class="empty">暂无动态</div>';
+    const rows = all.filter(j=>j.status!=='待确认');
+    $('#trackTable').innerHTML = `<thead><tr><th>公司/岗位</th><th>来源</th><th>当前状态</th><th>更新状态</th><th>备注</th><th>最近更新</th></tr></thead><tbody>` +
+      (rows.length ? rows.map(j=>`
+        <tr>
+          <td><b>${esc(j.company)}</b><br><span class="muted">${esc(j.position)} · ${esc(j.location||'')}</span></td>
+          <td><span class="plat plat-${esc(j.platform||'猎聘')}">${esc(j.platform||'猎聘')}</span></td>
+          <td><span class="badge st-${esc(j.status)}">${esc(j.status)}</span></td>
+          <td><select data-st="${j.id}">${STATUSES.filter(s=>s!=='待确认').map(s=>`<option ${s===j.status?'selected':''}>${s}</option>`).join('')}</select></td>
+          <td><input data-note="${j.id}" placeholder="如：HR 已加微信" style="width:140px"></td>
+          <td class="muted">${esc((j.updated_at||'').slice(0,16).replace('T',' '))}</td>
+        </tr>`).join('') : '<tr><td colspan="6" class="empty">暂无跟踪中的岗位</td></tr>') + '</tbody>';
+    document.querySelectorAll('[data-st]').forEach(sel => sel.onchange = () => updateStatus(sel.dataset.st, sel.value, document.querySelector(`[data-note="${sel.dataset.st}"]`)?.value));
+  }catch(e){}
+}
+async function updateStatus(id, status, note){
+  try{
+    requireSession();
+    const r = await cloud.database.from('jobs').update({ status, updated_at:new Date().toISOString() }).eq('id', id).select();
+    if (!Array.isArray(r.data) || !r.data.length) return toast('更新失败：记录不存在或无权限');
+    await logEvent(id, '状态→' + status, note || null);
+    toast('✅ 已更新为「' + status + '」');
+    loadDashboard();
+  }catch(e){ toast('更新失败：' + (e.message||e)); }
+}
+
+/* ===== 启动 ===== */
+restoreAuth();
+</script>
+</body>
+</html>

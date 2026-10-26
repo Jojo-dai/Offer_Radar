@@ -1,0 +1,63 @@
+{
+  "_comment": "复制为 config.json 后按需修改。前端不读这个文件（前端靠 SDK 自动识别所属应用），它只是给你自己做任务 prompt 替换时的对照表。",
+
+  "applicationId": "wbapp_XXXXXXXXXXXX",
+  "shareLink": "https://<your-app>.app.workbuddy.host/?sharecode=XXXXXXXX",
+
+  "workspace": "C:/Users/<you>/WorkBuddy/<workspace>",
+  "browseExe": "/c/Users/<you>/.workbuddy/skills/gstack/browse/dist/browse.exe",
+
+  "collect": {
+    "keywordsCount": 3,
+    "liepin": {
+      "searchUrl": "https://www.liepin.com/zhaopin/?key=<kw>",
+      "cardSelector": "a[data-nick=job-detail-job-info]",
+      "perKeywordLimit": 40,
+      "betweenKeywordsSeconds": [30, 60]
+    },
+    "linkedin": {
+      "searchUrl": "https://www.linkedin.com/jobs/search/?keywords=<kw>&location=<loc>",
+      "defaultLocation": "Shanghai, China",
+      "perKeywordLimit": 25,
+      "betweenKeywordsSeconds": [30, 60],
+      "requiresBrowser": "Microsoft Edge (extension channel, must be logged in)",
+      "networkGate": {
+        "assertLocNotCN": true,
+        "assertStatus200": true,
+        "skipInsteadOfDirectFallback": true
+      }
+    },
+    "maxInsertPerRun": 120
+  },
+
+  "dedupe": {
+    "key": "norm(company)|norm(position)",
+    "statusScope": "ALL",
+    "stripWords": ["招聘", "诚聘", "急招", "热招", "岗位名称", "职位名称", "岗位", "职位"],
+    "urlFallback": "strip ?# then compare",
+    "keepPriority": ["已投递", "面试中", "已查看", "待投递", "待确认", "不合适"]
+  },
+
+  "scoring": {
+    "weights": {
+      "skill": 0.35,
+      "industry": 0.15,
+      "level": 0.20,
+      "salaryLocation": 0.15,
+      "growth": 0.15
+    },
+    "temperature": 0.3,
+    "batchSize": 20,
+    "reasonMaxChars": 30,
+    "hardConflictBelow": 50
+  },
+
+  "schedule": {
+    "collect": ["08:00", "18:00"],
+    "feedbackSync": ["09:30", "19:30"],
+    "dashboardRefresh": ["08:40", "10:00", "18:40", "20:00"],
+    "watchdog": "hourly",
+    "stuckThresholdMinutes": 120,
+    "duplicateRunGuardMinutes": 90
+  }
+}

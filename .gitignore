@@ -1,0 +1,26 @@
+# 依赖（若将来引入构建工具）
+node_modules/
+package-lock.json
+pnpm-lock.yaml
+
+# 本地配置与密钥（绝不提交）
+config/config.json
+.env
+.env.*
+
+# 采集临时产物
+.workbuddy/tmp/
+tmp/
+*.tmp.json
+alive_nodes.json
+
+# 本地代理/网络诊断产物
+proxy-config.*
+vortex.json
+
+# 系统与编辑器
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.log
