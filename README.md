@@ -12,6 +12,7 @@
 
 ## 目录
 
+- [下载与安装（三种方式，10 秒开始）](#下载与安装三种方式10-秒开始)
 - [它能做什么 / 不做什么](#它能做什么--不做什么)
 - [整体架构](#整体架构)
 - [完整工作流（7 步）](#完整工作流7-步)
@@ -21,10 +22,27 @@
 - [跨 Agent 复现：身份与数据隔离](#跨-agent-复现身身份与数据隔离)
 - [首次运行引导（非 WorkBuddy 通道必读）](#首次运行引导非-workbuddy-通道必读)
 - [快速开始](#快速开始)
+- [采集通道适配：换一个 Agent 环境怎么跑](#采集通道适配换一个-agent-环境怎么跑)
 - [给 AI 的重建入口](#给-ai-的重建入口)
 - [目录结构](#目录结构)
 - [常见问题](#常见问题)
 - [许可与合规](#许可与合规)
+
+---
+
+## 下载与安装（三种方式，10 秒开始）
+
+```bash
+# 方式 1 · git clone（推荐，可随时 git pull 更新）
+git clone https://github.com/Jojo-dai/offer-radar.git
+cd offer-radar
+```
+
+**方式 2 · 网页直下**：仓库页右上角绿色 `<> Code` 按钮 → `Download ZIP` → 解压即用（无需 git）。
+
+**方式 3 · 喂给 AI**：clone 或解压后，把 `README.md` + `AGENTS.md` 的路径告诉 Claude Code / Codex，说一句「按 AGENTS.md 复刻这个项目」，AI 会照规格重建。
+
+> ⚠️ 下载后**不需要也不应该**安装任何依赖就能读完整个项目；要跑起来才按[快速开始](#快速开始)的路线走。仓库里没有任何密钥（全是占位符），你自己的密钥自己填。
 
 ---
 
@@ -420,6 +438,10 @@ bash scripts/check-network.sh
 
 不建系统也能用：读 [`docs/01-workflow.md`](docs/01-workflow.md)（流程）+ [`docs/07-matching-jev.md`](docs/07-matching-jev.md)（打分）+ [`docs/06-network.md`](docs/06-network.md)（网络），手动照做。
 
+### 换了 Agent 环境（Claude Code / Codex / 自建），采集通道怎么不断？
+
+读 [`docs/10-collect-adapters.md`](docs/10-collect-adapters.md)：每条来源的三层互备通道（自动 → 半自动 → 书签兜底）、各环境的定时调度替代方案、健康降级规则、换环境不许改的清单。
+
 ---
 
 ## 给 AI 的重建入口
@@ -449,6 +471,7 @@ job-apply-agent/
 │   ├── 07-matching-jev.md        ← JEV 五维打分方法论
 │   ├── 08-faq.md                 ← 排错与常见问题
 │   ├── 09-portability-auth.md    ← 跨 Agent 复现：身份与数据隔离
+│   ├── 10-collect-adapters.md    ← 换 Agent 环境的采集通道适配（三层互备）
 │   ├── assets/
 │   │   ├── architecture.svg      ← 整体架构图（README 首图）
 │   │   ├── workflow.svg          ← 七步工作流图
