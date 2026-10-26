@@ -17,6 +17,7 @@
 - [工作产出](#工作产出)
 - [网络边界：领英能不能跑，看这一节](#网络边界领英能不能跑看这一节)
 - [跨 Agent 复现：身份与数据隔离](#跨-agent-复现身身份与数据隔离)
+- [首次运行引导（非 WorkBuddy 通道必读）](#首次运行引导非-workbuddy-通道必读)
 - [快速开始](#快速开始)
 - [给 AI 的重建入口](#给-ai-的重建入口)
 - [目录结构](#目录结构)
@@ -334,7 +335,68 @@ curl -s -o /dev/null -w '%{http_code} %{redirect_url}\n' \
 
 ---
 
+## 首次运行引导（非 WorkBuddy 通道必读）
+
+> 把仓库下载到本地、用 Claude Code / Codex / 自己的服务器跑起来时，**第一次启动前必须先问用户三个问题，不要替用户默认**。
+> 在 WorkBuddy 平台内创建的应用自动继承身份链，可跳过本节。
+
+<p align="center">
+  <img src="docs/assets/first-run.svg" alt="首次运行引导：身份与存储 → 简历数据处理 → 网络与代理" width="900">
+</p>
+
+### 第 1 问 · 身份与存储：WorkBuddy 账号，还是自建 PG/Supabase？
+
+| 选项 | 需要准备 | 执行动作 | 简历数据隔离方式 |
+|---|---|---|---|
+| **A · WorkBuddy 账号** | 平台应用（`applicationId` + `publishableKey`） | 执行 `schema.sql` → 替换 `publicConfig` 三行 | OAuth JWT → `auth.uid()` → RLS **强制**；Agent 侧靠 prompt 约定不读简历字段 |
+| **B · 自建 PG / Supabase** | 数据库连接串（或项目 URL + JWT secret） | 执行 `schema.sql` **+** `auth-isolation.sql` | 非特权角色 + `set_config` 注入 + `FORCE RLS` **强制**；再 `REVOKE resume_text`，Agent 结构性读不到原文 |
+
+### 第 2 问 · 上传的简历文本，要不要落库？
+
+| 选项 | 存什么 | 代价 |
+|---|---|---|
+| **2a · 落库（默认）** | 脱敏文本 ≤20000 字 → `profiles.resume_text` | 重跑流程不用重传简历；数据在你自己的库里 |
+| **2b · 只存结构化画像** | 不存原文，只留目标 / 关键词 / 优势 / 短板 | 隐私最强；重跑要重传简历 |
+
+无论选哪个：**原始文件（docx / pdf / 图片）都不上传**，解析全部在浏览器本地完成；送给模型的只有脱敏文本。
+
+### 第 3 问 · 本地网络能不能过领英？
+
+**不要问用户"你有没有代理"——直接跑脚本验证**，用户往往说不清自己节点的真实出口：
+
+```bash
+bash scripts/check-network.sh
+```
+
+- 两条硬断言全过（出口非 CN + LinkedIn 返回 200）→ 启用双来源
+- 任一失败 → **领英整段跳过，不做直连降级**；岗位来源只剩猎聘，并明确告知用户「领英链接此刻可能打不开，这是预期行为，不是故障」
+
+### 必须明确告知用户的三件事
+
+1. 简历脱敏文本存在**你自己的数据库**里，不是"只在本地"
+2. 无代理时领英不可用是**设计预期**：不做直连降级、不重试硬闯，猎聘照常跑
+3. 走 B 路径时，Agent 绝不能用超级用户 / `service_role` / 带 `BYPASSRLS` 的角色
+
+### 给 AI 的引导话术（Claude / Codex 首次运行时直接用）
+
+```text
+首次运行检查——请依次确认三件事，任何一件未确认前不要开始采集：
+1) 数据库身份：用户选 WorkBuddy 账号，还是自建 PG/Supabase？
+   前者需要 applicationId + publishableKey；后者先执行 scripts/schema.sql 和
+   scripts/auth-isolation.sql，并完成越权自检（user-A 必须读不到 user-B 的任何行）。
+2) 简历落库策略：默认脱敏文本 ≤20000 字存 profiles.resume_text；
+   用户选「只存画像」则所有写入不得包含 resume_text 字段。
+3) 网络门禁：运行 bash scripts/check-network.sh。
+   全过 → 领英启用；未过 → 明确告知「当前只能使用猎聘一个岗位来源，
+   领英相关链接可能打不开，属预期行为」，并禁止直连领英重试。
+三问的结论写入 config/config.json 后再进入正常流程。
+```
+
+---
+
 ## 快速开始
+
+> 非 WorkBuddy 通道先完成上面的[首次运行引导](#首次运行引导非-workbuddy-通道必读)，再回到这里。
 
 ### 路线 A：只想用（不碰代码）
 
@@ -385,7 +447,8 @@ job-apply-agent/
 │   ├── 09-portability-auth.md    ← 跨 Agent 复现：身份与数据隔离
 │   ├── assets/
 │   │   ├── architecture.svg      ← 整体架构图（README 首图）
-│   │   └── workflow.svg          ← 七步工作流图
+│   │   ├── workflow.svg          ← 七步工作流图
+│   │   └── first-run.svg         ← 首次运行三问决策图
 │   └── collect/
 │       ├── liepin-bookmarklet.md ← 猎聘书签采集安装说明
 │       └── linkedin-bookmarklet.md

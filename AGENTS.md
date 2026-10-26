@@ -20,6 +20,7 @@
 - [ ] 手动点「⚡ 通知 Agent 立即采集」→ `agent_tasks` 出现 1 条 `pending` 记录 → 下一小时检查点消费后变 `done` / `failed`（含原因）
 - [ ] `docs/assets/architecture.svg` 与 `docs/assets/workflow.svg` 存在且被 README 引用（整体架构 + 七步工作流各一张）
 - [ ] 非 WorkBuddy 通道复现时：越权自检返回 0 行（`set_config('app.uid','user-A')` 后读不到 `user-B` 的任何行）
+- [ ] 非 WorkBuddy 通道复现时：首次启动先完成「三问」（身份与存储 / 简历落库策略 / 网络门禁），结论写入 config 后才开始采集；网络断言未过时领英整段跳过且已告知用户「仅猎聘一个来源」
 
 ---
 
@@ -164,6 +165,16 @@ COMMIT;
 验收：`set_config('app.uid','user-A')` 后 `count` 身份 B 的行，**必须返回 0**。
 
 完整 SQL 见 `scripts/auth-isolation.sql`，原理见 `docs/09-portability-auth.md`。
+
+### 3.7 首次运行三问（非 WorkBuddy 通道强制，WorkBuddy 通道可跳过）
+
+从 GitHub 下载并在本地 / 其他 Agent 里运行时，**第一次启动前必须依次向用户确认三问**，任何一问未确认不得开始采集：
+
+1. **身份与存储**：WorkBuddy 账号（需 `applicationId` + `publishableKey`，走 OAuth）还是自建 PG/Supabase（先执行 `schema.sql` + `auth-isolation.sql`，并通过越权自检）
+2. **简历落库策略**：默认脱敏文本 ≤20000 字存 `profiles.resume_text`；用户选「只存画像」则**所有写入不得包含 `resume_text` 字段**
+3. **网络门禁**：运行 `bash scripts/check-network.sh`。两条硬断言全过 → 领英启用；任一失败 → **领英整段跳过，禁止直连降级**，并明确告知用户「当前只能使用猎聘一个岗位来源，领英相关链接可能打不开，属预期行为」
+
+三问结论写入 `config/config.json` 后再进入正常流程。决策图见 `docs/assets/first-run.svg`，详细说明见 README「首次运行引导」章节。
 
 ---
 

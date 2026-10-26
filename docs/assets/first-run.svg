@@ -1,0 +1,85 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 660" width="1000" height="660" font-family="-apple-system, 'PingFang SC', 'Microsoft YaHei', 'Helvetica Neue', Arial, sans-serif">
+  <defs>
+    <marker id="fa" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#94a3b8"/>
+    </marker>
+  </defs>
+
+  <rect width="1000" height="660" fill="#ffffff"/>
+
+  <text x="40" y="42" font-size="20" font-weight="700" fill="#0f172a">首次运行引导（非 WorkBuddy 通道）</text>
+  <text x="40" y="66" font-size="12" fill="#64748b">下载到本地用 Claude Code / Codex 跑起来时，第一次启动前先把这三问问清楚，不要替用户默认</text>
+
+  <!-- 触发条 -->
+  <rect x="40" y="84" width="920" height="44" rx="10" fill="#f0fdf4" stroke="#86efac" stroke-width="1.5"/>
+  <text x="500" y="112" font-size="12" fill="#15803d" text-anchor="middle">触发条件：从 GitHub 下载 · 不在 WorkBuddy 平台内运行　→　首次启动必须先走下面三问（平台内创建的应用自动继承身份链，可跳过）</text>
+
+  <!-- ===== Q1 ===== -->
+  <rect x="40" y="152" width="200" height="88" rx="12" fill="#f1f5f9" stroke="#cbd5e1" stroke-width="1.5"/>
+  <text x="60" y="182" font-size="13" font-weight="700" fill="#0f172a">① 身份与存储</text>
+  <text x="60" y="204" font-size="11" fill="#64748b">谁是数据的主人</text>
+  <text x="60" y="224" font-size="11" fill="#94a3b8">决定写库用什么身份</text>
+
+  <rect x="262" y="152" width="340" height="88" rx="12" fill="#eff6ff" stroke="#2563eb" stroke-width="1.8"/>
+  <text x="278" y="180" font-size="13.5" font-weight="700" fill="#1d4ed8">A · WorkBuddy 账号登录</text>
+  <text x="278" y="202" font-size="11" fill="#3b82f6">OAuth 登录，替换 3 行 publicConfig</text>
+  <text x="278" y="224" font-size="11" fill="#1d4ed8">隔离：JWT → auth.uid() → RLS（强制）</text>
+
+  <rect x="622" y="152" width="338" height="88" rx="12" fill="#eff6ff" stroke="#2563eb" stroke-width="1.8"/>
+  <text x="638" y="180" font-size="13.5" font-weight="700" fill="#1d4ed8">B · 自建 PostgreSQL / Supabase</text>
+  <text x="638" y="202" font-size="11" fill="#3b82f6">执行 schema.sql + auth-isolation.sql</text>
+  <text x="638" y="224" font-size="11" fill="#1d4ed8">隔离：非特权角色 + FORCE RLS（强制）</text>
+
+  <line x1="140" y1="240" x2="140" y2="262" stroke="#94a3b8" stroke-width="2" marker-end="url(#fa)"/>
+
+  <!-- ===== Q2 ===== -->
+  <rect x="40" y="268" width="200" height="88" rx="12" fill="#f1f5f9" stroke="#cbd5e1" stroke-width="1.5"/>
+  <text x="60" y="298" font-size="13" font-weight="700" fill="#0f172a">② 简历数据处理</text>
+  <text x="60" y="320" font-size="11" fill="#64748b">原文要不要落库</text>
+  <text x="60" y="340" font-size="11" fill="#94a3b8">决定 Agent 能读到什么</text>
+
+  <rect x="262" y="268" width="340" height="88" rx="12" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.5"/>
+  <text x="278" y="296" font-size="13.5" font-weight="700" fill="#0f172a">2a · 落库（默认）</text>
+  <text x="278" y="318" font-size="11" fill="#64748b">脱敏文本 ≤20000 字存入 profiles.resume_text</text>
+  <text x="278" y="340" font-size="11" fill="#64748b">好处：重跑流程不用重传简历</text>
+
+  <rect x="622" y="268" width="338" height="88" rx="12" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.5"/>
+  <text x="638" y="296" font-size="13.5" font-weight="700" fill="#0f172a">2b · 只存结构化画像</text>
+  <text x="638" y="318" font-size="11" fill="#64748b">不存原文，只留目标/关键词/优势/短板</text>
+  <text x="638" y="340" font-size="11" fill="#64748b">隐私最强，代价是重跑要重传</text>
+
+  <line x1="140" y1="356" x2="140" y2="378" stroke="#94a3b8" stroke-width="2" marker-end="url(#fa)"/>
+
+  <!-- ===== Q3 ===== -->
+  <rect x="40" y="384" width="200" height="88" rx="12" fill="#f1f5f9" stroke="#cbd5e1" stroke-width="1.5"/>
+  <text x="60" y="414" font-size="13" font-weight="700" fill="#0f172a">③ 网络与代理</text>
+  <text x="60" y="436" font-size="11" fill="#64748b">领英能不能跑</text>
+  <text x="60" y="456" font-size="11" fill="#94a3b8">用脚本验证，别问自述</text>
+
+  <rect x="262" y="384" width="340" height="88" rx="12" fill="#f0fdf4" stroke="#86efac" stroke-width="1.8"/>
+  <text x="278" y="412" font-size="13.5" font-weight="700" fill="#15803d">有代理 · 先跑脚本验证</text>
+  <text x="278" y="434" font-size="11" fill="#166534">bash scripts/check-network.sh，两条硬断言全过</text>
+  <text x="278" y="456" font-size="11" fill="#166534">通过才启用领英采集</text>
+
+  <rect x="622" y="384" width="338" height="88" rx="12" fill="#fff7ed" stroke="#fb923c" stroke-width="1.8"/>
+  <text x="638" y="412" font-size="13.5" font-weight="700" fill="#c2410c">无代理 / 验证不通过</text>
+  <text x="638" y="434" font-size="11" fill="#9a3412">领英整段跳过，不做直连降级</text>
+  <text x="638" y="456" font-size="11" fill="#9a3412">来源只剩猎聘这一个</text>
+
+  <line x1="432" y1="472" x2="432" y2="494" stroke="#94a3b8" stroke-width="2" marker-end="url(#fa)"/>
+  <line x1="791" y1="472" x2="791" y2="494" stroke="#94a3b8" stroke-width="2" marker-end="url(#fa)"/>
+
+  <!-- ===== 结果 ===== -->
+  <rect x="262" y="500" width="340" height="76" rx="12" fill="#ecfdf5" stroke="#34d399" stroke-width="2"/>
+  <text x="278" y="528" font-size="14" font-weight="700" fill="#047857">双来源 · 猎聘 + 领英</text>
+  <text x="278" y="550" font-size="11" fill="#065f46">两条通道的岗位都带可打开的原链接</text>
+
+  <rect x="622" y="500" width="338" height="76" rx="12" fill="#fff7ed" stroke="#fb923c" stroke-width="2"/>
+  <text x="638" y="528" font-size="14" font-weight="700" fill="#c2410c">单来源 · 仅猎聘</text>
+  <text x="638" y="550" font-size="11" fill="#9a3412">领英链接此时可能打不开，属预期行为</text>
+
+  <!-- 底部告知条 -->
+  <rect x="40" y="596" width="920" height="44" rx="10" fill="#fef2f2" stroke="#fecaca" stroke-width="1.5"/>
+  <text x="500" y="616" font-size="11.5" fill="#b91c1c" text-anchor="middle">必须说出口的两句话　① 简历脱敏文本存在你的数据库里，不是「只在本地」　② 无代理时领英不可用是设计预期，不是故障</text>
+  <text x="500" y="633" font-size="11.5" fill="#b91c1c" text-anchor="middle">另：走 B 路径时，Agent 绝不能用超级用户 / service_role / BYPASSRLS 角色</text>
+</svg>

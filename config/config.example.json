@@ -1,5 +1,18 @@
 {
-  "_comment": "复制为 config.json 后按需修改。前端不读这个文件（前端靠 SDK 自动识别所属应用），它只是给你自己做任务 prompt 替换时的对照表。",
+  "_comment": "复制为 config.json 后按需修改。前端不读这个文件（前端靠 SDK 自动识别所属应用），它只是给你自己做任务 prompt 替换时的对照表。firstRun 三问由「首次运行引导」填写（见 README / docs/assets/first-run.svg）。",
+  "_firstRun_comment": "identityMode: workbuddy=OAuth 账号通道 | selfhosted=自建 PG/Supabase（须先执行 scripts/auth-isolation.sql 并通过越权自检）。resumeStorage: db=脱敏文本≤20000字落 profiles.resume_text | profile_only=不落原文，写入一律不含 resume_text 字段。networkGate.result 由 bash scripts/check-network.sh 的实际结果填写，禁止凭用户自述通过。",
+
+  "firstRun": {
+    "identityMode": "workbuddy | selfhosted",
+    "resumeStorage": "db | profile_only",
+    "networkGate": {
+      "checked": false,
+      "assertLocNotCN": null,
+      "assertStatus200": null,
+      "result": "pending | dual_source | liepin_only",
+      "userInformedSingleSource": false
+    }
+  },
 
   "applicationId": "wbapp_XXXXXXXXXXXX",
   "shareLink": "https://<your-app>.app.workbuddy.host/?sharecode=XXXXXXXX",
