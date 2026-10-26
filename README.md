@@ -112,16 +112,16 @@
 ```jsonc
 {
   "target_profile": {          // 目标岗位：职级、方向、行业、城市（含 cities_en）
-    "roles": ["业务解决方案负责人", "AI 产品经理"],
-    "level": "总监/负责人",
-    "industries": ["企业服务", "AI 应用"],
-    "cities": ["上海", "深圳"],
-    "cities_en": ["Shanghai, China", "Shenzhen, China"]
+    "roles": ["数据平台工程师", "后端开发工程师"],
+    "level": "高级/资深",
+    "industries": ["互联网", "云计算"],
+    "cities": ["杭州", "成都"],
+    "cities_en": ["Hangzhou, China", "Chengdu, China"]
   },
-  "keywords": ["全面预算", "业财一体化", "AI产品经理"],      // 猎聘用：中文
-  "keywords_en": ["AI Product Manager", "Solutions Architect"], // 领聘用：英文
-  "competitiveness": ["10 年 B 端解决方案", "预算系统落地 30+ 客户"],
-  "gaps": ["缺少大模型工程化经验"]
+  "keywords": ["实时计算", "数据湖", "后端开发"],      // 猎聘用：中文
+  "keywords_en": ["Backend Engineer", "Data Platform Engineer"], // 领聘用：英文
+  "competitiveness": ["8 年后端与数据平台经验", "TB 级数据链路落地 5+ 个"],
+  "gaps": ["缺少大规模分布式训练经验"]
 }
 ```
 

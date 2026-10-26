@@ -9,20 +9,20 @@
 ```jsonc
 {
   "target_profile": {
-    "roles": ["业务解决方案负责人", "AI 产品经理"],
-    "level": "总监/负责人",
-    "industries": ["企业服务", "AI 应用"],
-    "cities": ["上海", "深圳"],
-    "cities_en": ["Shanghai, China", "Shenzhen, China"]
+    "roles": ["数据平台工程师", "后端开发工程师"],
+    "level": "高级/资深",
+    "industries": ["互联网", "云计算"],
+    "cities": ["杭州", "成都"],
+    "cities_en": ["Hangzhou, China", "Chengdu, China"]
   },
-  "keywords": ["全面预算", "业财一体化", "AI产品经理"],
-  "keywords_en": ["AI Product Manager", "Solutions Architect", "Presales Consultant"],
+  "keywords": ["实时计算", "数据湖", "后端开发"],
+  "keywords_en": ["Backend Engineer", "Data Platform Engineer", "Stream Processing"],
   "competitiveness": [
-    "10 年 B 端解决方案与售前经验",
-    "预算/合并报表系统落地 30+ 客户",
-    "1 年 AI 产品从 0 到 1"
+    "8 年后端与数据平台经验",
+    "TB 级实时数据链路落地 5+ 个",
+    "2 年 AI 基建从 0 到 1"
   ],
-  "gaps": ["缺少大模型工程化落地案例"],
+  "gaps": ["缺少大规模分布式训练经验"],
   "confirmed": true
 }
 ```
@@ -91,7 +91,7 @@
 · 自检清理重复 0 条
 · 已自动打分 27 条
 
-最高分：金蝶 · 全面预算领域专家 90 分 / 埃森哲 · SAP BPC 78 分 / 用友 · 海外ERP 58 分
+最高分：星辰数据 · 资深后端专家 90 分 / 云脉科技 · 数据平台架构师 78 分 / 北岸软件 · 后端开发 58 分
 👉 去「③ 投递清单 · 最新岗位清单」查看
 ```
 
