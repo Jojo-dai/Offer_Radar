@@ -19,6 +19,7 @@
 - [ ] `bash scripts/check-network.sh` 两条硬断言全过；未过时领英段必须跳过而不是直连抓取
 - [ ] 手动点「⚡ 通知 Agent 立即采集」→ `agent_tasks` 出现 1 条 `pending` 记录 → 下一小时检查点消费后变 `done` / `failed`（含原因）
 - [ ] `docs/assets/architecture.svg` 与 `docs/assets/workflow.svg` 存在且被 README 引用（整体架构 + 七步工作流各一张）
+- [ ] 非 WorkBuddy 通道复现时：越权自检返回 0 行（`set_config('app.uid','user-A')` 后读不到 `user-B` 的任何行）
 
 ---
 
@@ -140,6 +141,29 @@
 3. `ALTER TABLE <table> ENABLE ROW LEVEL SECURITY;`
 4. `CREATE POLICY <table>_owner ON <table> FOR ALL USING (owner_id = auth.uid()) WITH CHECK (owner_id = auth.uid());`
 5. 序列权限（bigint 自增表）：`GRANT USAGE, SELECT ON SEQUENCE <table>_id_seq TO authenticated, anon;`
+
+### 3.6 身份注入（非 WorkBuddy 通道必做，WorkBuddy 通道可跳过）
+
+上面 1-5 步只保证**读隔离**（浏览器端 OAuth → `auth.uid()` → RLS）。若你在 WorkBuddy 之外复现（Claude Code / Codex 直连数据库），**写隔离**必须额外补三步，否则 Agent 将以特权身份跨用户读写：
+
+1. 建**非特权**角色 `job_agent`（`LOGIN`，只给 4 张表的 CRUD + 序列 USAGE）——**禁止**超级用户、`service_role`、带 `BYPASSRLS` 的角色
+2. 实现 `auth.uid()` 等价物：`SELECT nullif(current_setting('app.uid', true), '')`
+3. 四张表全部 `ALTER TABLE <t> FORCE ROW LEVEL SECURITY;`（否则表 owner 绕过 RLS）
+
+Agent 每次写库必须包在事务里：
+
+```sql
+BEGIN;
+SELECT set_config('app.uid', '<owner_id>', true);   -- 第三参 true = 仅本事务
+-- … 读写语句（无需手写 WHERE owner_id，RLS 会限行）
+COMMIT;
+```
+
+**必须 `set_config(..., true)` 或 `SET LOCAL`**；用 `SET` 会污染会话，连接池复用时造成跨用户串号。
+
+验收：`set_config('app.uid','user-A')` 后 `count` 身份 B 的行，**必须返回 0**。
+
+完整 SQL 见 `scripts/auth-isolation.sql`，原理见 `docs/09-portability-auth.md`。
 
 ---
 

@@ -16,6 +16,7 @@
 - [工作边界](#工作边界)
 - [工作产出](#工作产出)
 - [网络边界：领英能不能跑，看这一节](#网络边界领英能不能跑看这一节)
+- [跨 Agent 复现：身份与数据隔离](#跨-agent-复现身身份与数据隔离)
 - [快速开始](#快速开始)
 - [给 AI 的重建入口](#给-ai-的重建入口)
 - [目录结构](#目录结构)
@@ -313,6 +314,26 @@ curl -s -o /dev/null -w '%{http_code} %{redirect_url}\n' \
 
 ---
 
+## 跨 Agent 复现：身份与数据隔离
+
+这套东西交给 Claude / Codex 复现，**简历数据不会流到 Agent 手里**。
+
+简历只落在两处：云库的 `profiles.resume_text`（RLS 强制只有本人可读）+ 浏览器内存。Agent 只读写**画像字段和岗位数据**，从不持有简历原文。
+
+真正需要设计的是「**Agent 用什么身份写库**」，因为读链路天然隔离，写链路才有权限问题：
+
+| 路径 | 身份来源 | 隔离强度 |
+|---|---|---|
+| A. 留在 WorkBuddy | OAuth 会话 → `auth.uid()` → RLS | 读强制 + 写约定（靠 prompt 带 `owner_id`） |
+| B. 换 Supabase / 自建 PG（Codex 走这条） | 非特权角色 + `set_config('app.uid', …, true)` + `FORCE ROW LEVEL SECURITY` | 读**和写**都强制 |
+| C. 纯本地单机 | 操作系统账户 + 文件权限 | 取决于本机账户安全 |
+
+**一条铁律**：Agent 绝不要用超级用户、`service_role` 或带 `BYPASSRLS` 的角色——它们绕过 RLS，隔离直接归零。
+
+完整做法（含可直接执行的 SQL、越权自检脚本、5 个常见坑）见 **[`docs/09-portability-auth.md`](docs/09-portability-auth.md)** 与 **[`scripts/auth-isolation.sql`](scripts/auth-isolation.sql)**。
+
+---
+
 ## 快速开始
 
 ### 路线 A：只想用（不碰代码）
@@ -326,7 +347,7 @@ curl -s -o /dev/null -w '%{http_code} %{redirect_url}\n' \
 3. **部署前端**：把 `app/index.html` 里的 `publicConfig` 三行换成你自己的（`endpoint` / `publishableKey` / `oauthRelayBaseUrl`），再作为静态站点发布。仓库里是占位符，不填跑不起来——这是刻意的，避免把别人的部署 key 带进你的环境
 4. **建 3 个定时任务**：把 [`docs/05-automations.md`](docs/05-automations.md) 里的三段 prompt 原样粘贴，时间分别设 08:00 / 18:00 / 每小时
 5. **改配置**：把 [`config/config.example.json`](config/config.example.json) 里的占位（`applicationId`、`shareLink`、关键词默认值）替换成你自己的，并同步到 prompt 里
-6. **验网络**：跑 `bash scripts/check-network.sh`，三条断言都过再启用领英部分
+6. **验网络**：跑 `bash scripts/check-network.sh`，两条硬断言都过再启用领英部分
 7. **验链路**：把 `samples/demo-jobs.json` 粘贴进「智能导入」，应导入 6 条、0 条重复；再点「🧮 按画像批量打分」应出现分数
 
 ### 路线 C：只要方法论
@@ -361,6 +382,7 @@ job-apply-agent/
 │   ├── 06-network.md             ← 网络边界与领英可达性判定
 │   ├── 07-matching-jev.md        ← JEV 五维打分方法论
 │   ├── 08-faq.md                 ← 排错与常见问题
+│   ├── 09-portability-auth.md    ← 跨 Agent 复现：身份与数据隔离
 │   ├── assets/
 │   │   ├── architecture.svg      ← 整体架构图（README 首图）
 │   │   └── workflow.svg          ← 七步工作流图
@@ -370,6 +392,7 @@ job-apply-agent/
 ├── scripts/
 │   ├── schema.sql                ← 建表 + RLS + GRANT
 │   ├── dedupe.sql                ← 全状态查重与清理
+│   ├── auth-isolation.sql        ← 路径 B：非特权角色 + 强制 RLS + 越权自检
 │   └── check-network.sh          ← 领英可达性自检（两条硬断言）
 ├── config/
 │   └── config.example.json       ← 需要替换的占位配置
