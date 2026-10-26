@@ -248,11 +248,17 @@
 
 <script src="https://cdn.jsdelivr.net/npm/@tencent-ai/workbuddy-cloud-sdk@dev/lib/index.global.js"></script>
 <script>
-/* ===== 云服务初始化（publicConfig 由云端环境注入）===== */
+/* ===== 云服务初始化 =====
+   把下面三项替换成你自己的应用信息（在你的云应用「发布/配置」面板里能找到）：
+     endpoint        你的应用发布域名，形如 https://<your-app>.app.workbuddy.host
+     publishableKey  你的可公开客户端 Key，形如 wbpk_<applicationId>_<...>
+   注意：不要提交真实 Key 到公开仓库——虽然名为 publishable，但它绑定你的应用实例，
+   别人拿到就能读写你数据库里他能通过 RLS 的部分。
+*/
 const publicConfig = {
-  endpoint: 'https://job-apply-agent-36841.app.workbuddy.host',
+  endpoint: 'https://<your-app>.app.workbuddy.host',
   oauthRelayBaseUrl: 'https://www.workbuddy.cn/v2/as/genie-baas/oauth',
-  publishableKey: 'wbpk_rzDA64OB3kPBpqyVfJTxnU_qvG6WCBWZvh0OfZQOnwReKhL1DF2Qhyd'
+  publishableKey: '<YOUR_PUBLISHABLE_KEY>'
 };
 const cloud = WorkBuddyCloud.createWorkBuddyCloud({
   endpoint: publicConfig.endpoint,
