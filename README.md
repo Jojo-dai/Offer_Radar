@@ -322,11 +322,18 @@ DDL 见 [`scripts/schema.sql`](scripts/schema.sql)。
 curl -s https://www.cloudflare.com/cdn-cgi/trace | grep -E '^(ip|loc)='
 #   期望：loc=US（或其他非 CN）  失败：loc=CN → 不跑领英
 
-# 硬断言 2：领英搜索页返回 200，而不是 302 到 linkedin.cn
-curl -s -o /dev/null -w '%{http_code} %{redirect_url}\n' \
-  'https://www.linkedin.com/jobs/search/?keywords=AI%20Product%20Manager'
-#   期望：200           失败：302 https://www.linkedin.cn/... → 不跑领英
+# 硬断言 2：领英搜索页可访问（跟随站内跳转后仍能拿到内容）
+curl -sL -o /dev/null -w '%{http_code} %{url_effective}\n' \
+  'https://www.linkedin.com/jobs/search/?keywords=AI%20Product%20Manager&location=Shanghai%2C%20China&f_TPR=r259200'
+#   期望：200（跳转 1 次到 /jobs/xxx-jobs 属正常 SEO 规范化）
+#   需登录：401/403（站点通，但你得先在 Edge 登录领英）
+#   失败：最终落到 linkedin.cn → 不跑领英
+#   限流：429 → 等 30-60 分钟再试，期间不要采集（重试只会加重限流）
 ```
+
+> ⚠️ 两个容易误判的坑（都真实踩过）：
+> 1. **`/jobs/search/?keywords=...` 会 301 到 `/jobs/xxx-jobs` 这类 SEO 地址**，这是站内规范化，不是封锁——必须用 `-L` 跟随后再判定，否则会把「可用」误判成「不可用」而白跳过领英
+> 2. **带 `location=Shanghai, China` 时可能被导向 `cn.linkedin.com`（中国区子域）**，页面结构与主站不同、抓取选择器也不同，且该子域限流更严（容易 429）
 
 > 为什么不再要求「出口 IP ≠ 本机 IP」：TUN 全局模式下所有流量都进隧道，这个比较会天然相等，反而误判。真正能判定"隧道是否生效"的是上面两条断言的结果本身。
 
@@ -337,6 +344,8 @@ curl -s -o /dev/null -w '%{http_code} %{redirect_url}\n' \
 | 现象 | 含义 | 处置 |
 |---|---|---|
 | `302 → linkedin.cn` | 出口被判 CN，或 `linkedin.com` 被分流走直连 | 不跑领英，记 `失败原因：领英重定向linkedin.cn` |
+| `429` | 出口 IP 近期请求过多被限流 | **不重试**，记 `失败原因：领英限流429`，下一轮再试（重试会延长限流） |
+| 落到 `cn.linkedin.com` | 搜索被导向中国区子域（页面结构与主站不同） | 按该子域实际 DOM 解析；若 429 则按限流处理 |
 | `loc=CN` 但 IP 是代理出口 | 代理节点出口段被判 CN（常见于亚太 IPv6 / 中转线路） | 换节点，优先美国 IPv4 出口 |
 | 出口 IP = 本机公网 IP | 代理没接管（Fake-IP 与 TUN 未配对、或规则直连） | 开 TUN / 关 Fake-IP 再验 |
 | 页面出现 451 / authwall / 验证码 | 被风控或未登录 | 停止本轮，提示用户人工检查浏览器登录态 |

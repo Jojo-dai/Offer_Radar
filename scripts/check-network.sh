@@ -3,7 +3,9 @@
 # 领英可达性自检
 #   硬断言（全过才允许跑领英）：
 #     1) 出口 IP 地理判定不是 CN
-#     2) linkedin.com/jobs/search 返回 200（不是 302 → linkedin.cn）
+#     2) 领英搜索页跟随站内跳转后仍可访问（200 / 或 401·403 表示需登录），且最终不落 linkedin.cn
+#        —— 注意：linkedin.com 会把 /jobs/search/?keywords=... 301 到 /jobs/xxx-jobs 这类
+#           SEO 规范化地址，这是正常站内跳转，不是封锁，不能判失败
 #   辅助判定（仅提示，不参与退出码）：
 #     3) 出口 IP 与本机直连 IP 的关系（TUN 全局模式下两者相同是正常现象）
 #
@@ -56,25 +58,32 @@ else
 fi
 
 say ""
-say "=== 硬断言 2：领英搜索页必须返回 200 ==="
-RES=$(curl -s --noproxy '*' --max-time 25 "${CURL_PROXY[@]}" \
-      -o /dev/null -w '%{http_code} %{redirect_url}' \
-      'https://www.linkedin.com/jobs/search/?keywords=AI%20Product%20Manager' 2>/dev/null || true)
+say "=== 硬断言 2：领英搜索页必须可访问（跟随站内跳转后为 200） ==="
+RES=$(curl -sL --noproxy '*' --max-time 30 "${CURL_PROXY[@]}" \
+      -o /dev/null -w '%{http_code} %{url_effective} %{num_redirects}' \
+      'https://www.linkedin.com/jobs/search/?keywords=AI%20Product%20Manager&location=Shanghai%2C%20China&f_TPR=r259200' 2>/dev/null || true)
 CODE=$(printf '%s' "$RES" | awk '{print $1}')
-REDIR=$(printf '%s' "$RES" | cut -d' ' -f2-)
-say "  HTTP=$CODE  redirect=${REDIR:-无}"
-case "$CODE" in
-  200) ok "领英搜索页 200" ;;
-  302) if printf '%s' "$REDIR" | grep -q 'linkedin\.cn'; then
-         bad "302 → linkedin.cn：出口被判 CN，或 linkedin.com 被分流走直连"
-       else
-         bad "302 → ${REDIR}（非预期跳转，需人工确认）"
-       fi ;;
-  451) bad "451：区域限制（IP 被判中国大陆）" ;;
-  999) bad "999：领英风控（请求特征被拦）" ;;
-  000) bad "无响应：代理不通或超时" ;;
-  *)   bad "返回 ${CODE}，非 200" ;;
-esac
+FINAL=$(printf '%s' "$RES" | awk '{print $2}')
+NRED=$(printf '%s' "$RES" | awk '{print $3}')
+say "  最终 HTTP=${CODE:-无}  跳转次数=${NRED:-0}  最终地址=${FINAL:-无}"
+if printf '%s' "$FINAL" | grep -q 'linkedin\.cn'; then
+  bad "最终落到 linkedin.cn：出口被判 CN，或 linkedin.com 被分流走直连"
+else
+  if printf '%s' "$FINAL" | grep -q 'cn\.linkedin\.com'; then
+    say "  ⚠️ 被导向 cn.linkedin.com（领英中国区子域）：页面结构与主站不同，"
+    say "     采集时必须按该子域的实际 DOM 解析；若此处返回 429，说明该子域正在限流"
+  fi
+  case "$CODE" in
+    200) ok "领英搜索页可访问（已跟随 ${NRED:-0} 次跳转；linkedin.com 对未登录访客做 SEO 规范化跳转属正常）" ;;
+    401|403)
+         ok "返回 ${CODE}：站点可达但要求登录 → 需在 Edge 里登录领英（采集前确认登录态）" ;;
+    429) bad "429 限流：该出口 IP 近期请求过多，请等待 30-60 分钟再试，期间不要采集（重试只会加重限流）" ;;
+    451) bad "451：区域限制（IP 被判中国大陆）" ;;
+    999) bad "999：领英风控（请求特征被拦）" ;;
+    000) bad "无响应：代理不通或超时" ;;
+    *)   bad "返回 ${CODE}（非 200，且未落到 linkedin.cn，需人工确认）" ;;
+  esac
+fi
 
 say ""
 say "=== 辅助判定 3：出口 IP 与本机直连 IP 的关系（仅提示） ==="

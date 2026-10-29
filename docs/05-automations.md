@@ -35,9 +35,13 @@
 用 /c/Users/<USER>/.workbuddy/skills/gstack/browse/dist/browse.exe：1) goto 该 URL（含 Server failed 则重试一次）；2) sleep 5；3) 执行 js 提取（单行 JSON.stringify）：遍历 document.querySelectorAll('a[data-nick=job-detail-job-info]')，取 title=第一个 div[title] 的 title 属性；link=a.href 去掉 ? 后参数；salary=a 内 span 文本匹配 /^\d/ 且含 k 或 万 的第一个；location=以 区/县/市 结尾的第一个 span 文本；tags=含「年以下|年以上|本科|硕士|大专|博士」的 span 文本拼接；company=a.closest('li') 内 [class*=companyName] 或 [data-nick*=company] 的文本；4) 写入 .workbuddy/tmp/liepin-<关键词slug>.json。0 条则记录后继续。
 
 【第2步：领英采集（条件执行）】mcp__browser__browsers_list：无 Edge 扩展浏览器则跳过并注明「领英未采集：Edge 未连接」。有则取最多 3 个英文关键词（keywords_en 为空则跳过并提示「画像缺英文关键词」）。地点取 target_profile.cities_en 第一个，不含「China」则追加「, China」（%2C%20China），缺省 Shanghai%2C%20China。每个关键词：
-1) tabs_new 打开 https://www.linkedin.com/jobs/search/?keywords=<编码关键词>&location=<地点>，等 6 秒；
-2) tab_screenshot + tab_url 检查：若重定向到 linkedin.cn 或出现 451/登录页/验证码/认证墙 → 领英整体放弃（不重试、不点击），原因记「领英重定向到 linkedin.cn：Edge 未走全局代理」；有 cookie/广告遮罩可点 × 关闭；
-3) tab_screenshot + dom_cua_get_visible_dom 读卡片：title、company、location、link（href 含 /jobs/view/，去掉 ? 后参数）、salary（空则「面议」）；最多 25 条，不翻页、不滚动；
+1) tabs_new 打开 https://www.linkedin.com/jobs/search/?keywords=<编码关键词>&location=<地点>&f_TPR=r259200，等 6 秒（f_TPR=r259200 = 只看近 3 天发布的岗位，大幅降低与池子撞车的重复率）；
+2) tab_screenshot + tab_url 检查：若重定向到 linkedin.cn 或出现 451/登录页/验证码/认证墙 → 领英整体放弃（不重试、不点击），原因记「领英重定向到 linkedin.cn：Edge 未走全局代理」；若页面出现 429 / 「Too Many Requests」/ 空白风控页 → 立即放弃领英（**绝不重试、绝不换关键词再试**），原因记「领英限流429」；有 cookie/广告遮罩可点 × 关闭。注意：跳转到 cn.linkedin.com（中国区子域）不算失败，按该页实际 DOM 解析即可；
+3) 滚动加载 + 分段读卡片（领英为懒加载，首屏只渲染 6-8 张，不滚动等于白采）：
+   a. cua_scroll 向下滚动约 1200px，等 4-6 秒随机；重复 3 次（共 3 屏），每次滚动后追加一次 dom_cua_get_visible_dom；
+   b. 每次读取的卡片按 link 去重累积（LinkedIn 虚拟化列表，滚动后旧卡片会从 DOM 消失，必须分次累积，不能只读最后一次）；
+   c. 字段：title、company、location、link（href 含 /jobs/view/，去掉 ? 后参数）、salary（空则「面议」）；累积上限 25 条；
+   d. 不点「分页/加载更多按钮」，只做自然向下滚动；滚动到位后不再回滚、不点任何卡片；
 4) 写入 .workbuddy/tmp/linkedin-<关键词slug>.json（platform='领英'）；
 5) 卡片缺链接时用「岗位名+公司名」精确搜索一次补齐 /jobs/view/<id>；仍找不到则在 jd_summary 标注。间隔 sleep 30-60 秒。只读，绝不点职位卡、绝不 Easy Apply。
 
@@ -100,9 +104,13 @@ UPDATE agent_tasks SET status='failed', note='失败原因：运行超时无响�
 【第4步：领英采集（条件执行）】调用 mcp__browser__browsers_list：
 - 若没有 Edge 扩展浏览器（name=Microsoft Edge, type=extension）：跳过领英部分，记下原因「领英未采集：Edge 未连接」。
 - 若有：取最多 3 个英文关键词（keywords_en；为空则跳过并记下原因「画像缺英文关键词」）。构造地点参数：取 target_profile.cities_en 第一个，若不含「China」则在末尾追加「, China」（%2C%20China）；缺省 Shanghai%2C%20China。对每个关键词：
-  1. tabs_new 打开 https://www.linkedin.com/jobs/search/?keywords=<URL编码关键词>&location=<地点> ，等 6 秒；
+  1. tabs_new 打开 https://www.linkedin.com/jobs/search/?keywords=<URL编码关键词>&location=<地点>&f_TPR=r259200 ，等 6 秒（只看近 3 天发布，降低重复率）；
   2. tab_screenshot + tab_url 检查：若 tab_url 被重定向到 linkedin.cn、或页面出现 451/登录页/验证码/认证墙 → 领英整体放弃（不重试、不点击），记下原因「领英重定向到 linkedin.cn：Edge 未走全局代理」；有 cookie/广告遮罩可点 × 关闭；
-  3. tab_screenshot + dom_cua_get_visible_dom 读取职位卡片：title、company、location、link（href 含 /jobs/view/，去掉 ? 后参数）、salary（为空填「面议」）；每次最多 25 条，不翻页不滚动；
+  3. 滚动加载 + 分段读卡片（首屏只渲染 6-8 张，必须滚动）：
+     a. cua_scroll 向下约 1200px 后等 4-6 秒随机，重复 3 次；每次滚动后追加一次 dom_cua_get_visible_dom；
+     b. 按 link 去重累积（虚拟化列表会移除旧卡片，不能只读最后一次）；
+     c. 字段：title、company、location、link（href 含 /jobs/view/，去掉 ? 后参数）、salary（为空填「面议」）；累积上限 25 条；
+     d. 不点分页/加载更多按钮，只做自然向下滚动，不点击任何职位卡；
   4. 写入 .workbuddy/tmp/linkedin-<关键词slug>.json（platform='领英'）。
 每个关键词之间 sleep 30-60 秒。全程只读领英页面，绝不点击职位卡、绝不点击 Easy Apply。
 
