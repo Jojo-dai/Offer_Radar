@@ -98,7 +98,7 @@ UPDATE agent_tasks SET status='failed', note='失败原因：运行超时无响�
 用命令 /c/Users/<USER>/.workbuddy/skills/gstack/browse/dist/browse.exe：
 1. goto 该 URL（若输出含 Server failed 则再执行一次 goto 重试）
 2. sleep 5
-3. 执行 js 提取（单行 JSON.stringify）：遍历 document.querySelectorAll('a[data-nick=job-detail-job-info]')，每条取：title = 第一个 div[title] 的 title 属性；link = a.href 去掉 ? 后参数；salary = a 内 span 文本中匹配 /^\d/ 且含 k 或 万 的第一个；location = span 文本中以 区/县/市 结尾的第一个；tags = 匹配含「年以下|年以上|本科|硕士|大专|博士」的 span 文本拼接；company = a.closest('li') 内 [class*=companyName] 或 [data-nick*=company] 元素的文本。
+3. 执行 js 提取（单行 JSON.stringify）：遍历 document.querySelectorAll('a[data-nick=job-detail-job-info]')，每条取：title = 第一个 div[title] 的 title 属性；link = a.href 去掉 ? 后参数；salary = a 内 span 文本中匹配 /^\d/ 且含 k 或 万 的第一个；location = a.textContent 匹配 /【([^】]+)】/ 的第一段（如「苏州-常熟」，旧版按「区/县/市」结尾匹配会漏掉「xx-xx」格式）；tags = 匹配含「年以下|年以上|本科|硕士|大专|博士」的 span 文本拼接；company = a.closest('div.jobDetailBox')（注意：2026-10 实测卡片没有 li 容器，closest('li') 返回 null）内 [class*=companyNam] 元素的文本。实测避坑：browse 守护进程崩溃后会在 <WORKSPACE>/.gstack/terminal-agent-pid.lock 留下 0 字节残留锁，导致后续所有启动报「Server failed to start」——重试前先删除该锁文件；若环境变量含失效的 HTTP(S)_PROXY，browse 启动时也会失败，需先 unset。
 4. 把 JSON 写入 .workbuddy/tmp/liepin-<关键词slug>.json。若猎聘整体失败（goto 连续异常/验证码），记下失败原因，继续第4步。
 
 【第4步：领英采集（条件执行）】调用 mcp__browser__browsers_list：
