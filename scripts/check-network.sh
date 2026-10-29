@@ -61,7 +61,7 @@ say ""
 say "=== 硬断言 2：领英搜索页必须可访问（跟随站内跳转后为 200） ==="
 RES=$(curl -sL --noproxy '*' --max-time 30 "${CURL_PROXY[@]}" \
       -o /dev/null -w '%{http_code} %{url_effective} %{num_redirects}' \
-      'https://www.linkedin.com/jobs/search/?keywords=AI%20Product%20Manager&location=Shanghai%2C%20China&f_TPR=r259200' 2>/dev/null || true)
+      'https://www.linkedin.com/jobs/search/?keywords=AI%20Product%20Manager&location=Shanghai%2C%20China&f_TPR=r604800' 2>/dev/null || true)
 CODE=$(printf '%s' "$RES" | awk '{print $1}')
 FINAL=$(printf '%s' "$RES" | awk '{print $2}')
 NRED=$(printf '%s' "$RES" | awk '{print $3}')

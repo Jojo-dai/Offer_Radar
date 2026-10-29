@@ -324,7 +324,7 @@ curl -s https://www.cloudflare.com/cdn-cgi/trace | grep -E '^(ip|loc)='
 
 # 硬断言 2：领英搜索页可访问（跟随站内跳转后仍能拿到内容）
 curl -sL -o /dev/null -w '%{http_code} %{url_effective}\n' \
-  'https://www.linkedin.com/jobs/search/?keywords=AI%20Product%20Manager&location=Shanghai%2C%20China&f_TPR=r259200'
+  'https://www.linkedin.com/jobs/search/?keywords=AI%20Product%20Manager&location=Shanghai%2C%20China&f_TPR=r604800'
 #   期望：200（跳转 1 次到 /jobs/xxx-jobs 属正常 SEO 规范化）
 #   需登录：401/403（站点通，但你得先在 Edge 登录领英）
 #   失败：最终落到 linkedin.cn → 不跑领英
