@@ -34,19 +34,18 @@
 【第1步：猎聘无头采集】取最多 3 个中文关键词构造 URL：https://www.liepin.com/zhaopin/?key=<URL编码关键词>。每个关键词依次（间隔 sleep 30-60 秒）：
 用 /c/Users/<USER>/.workbuddy/skills/gstack/browse/dist/browse.exe：1) goto 该 URL（含 Server failed 则重试一次）；2) sleep 5；3) 执行 js 提取（单行 JSON.stringify）：遍历 document.querySelectorAll('a[data-nick=job-detail-job-info]')，取 title=第一个 div[title] 的 title 属性；link=a.href 去掉 ? 后参数；salary=a 内 span 文本匹配 /^\d/ 且含 k 或 万 的第一个；location=以 区/县/市 结尾的第一个 span 文本；tags=含「年以下|年以上|本科|硕士|大专|博士」的 span 文本拼接；company=a.closest('li') 内 [class*=companyName] 或 [data-nick*=company] 的文本；4) 写入 .workbuddy/tmp/liepin-<关键词slug>.json。0 条则记录后继续。
 
-【第2步：领英采集（条件执行）】mcp__browser__browsers_list：无 Edge 扩展浏览器则跳过并注明「领英未采集：Edge 未连接」。有则做关键词选择：读 keywords_en 全量列表，去掉含括号注释的词（如「RAG (Retrieval-Augmented Generation)」截取括号前部分使用）后得到有效词池。再读游标文件 .workbuddy/tmp/linkedin-kw-cursor.txt（不存在则视为 0），从游标位置起取 3 个（循环轮换），**避免每轮都只用前 3 个词导致其余词永远采不到**；用完把 (游标+3)%池子长度 写回游标文件。若游标轮到连续两轮都 0 入库的词，跳过换下一词。地点取 target_profile.cities_en 第一个，不含「China」则追加「, China」（%2C%20China），缺省 Shanghai%2C%20China。每个关键词：
-1) tabs_new 打开 https://www.linkedin.com/jobs/search/?keywords=<编码关键词>&location=<地点>&f_TPR=r604800，等 6 秒（f_TPR=r604800 = 近一周。2026-10-29 实测：上海 AI Product Manager 近一周有 159 个结果，而近 3 天（r259200）大幅缩水导致每轮入库个位数；重复问题交给第3步全状态查重兜底，不怕窗口宽）；
-2) tab_screenshot + tab_url 检查：若重定向到 linkedin.cn 或出现 451/登录页/验证码/认证墙 → 领英整体放弃（不重试、不点击），原因记「领英重定向到 linkedin.cn：Edge 未走全局代理」；若页面出现 429 / 「Too Many Requests」/ 空白风控页 → 立即放弃领英（**绝不重试、绝不换关键词再试**），原因记「领英限流429」；有 cookie/广告遮罩可点 × 关闭。注意：跳转到 cn.linkedin.com（中国区子域）不算失败，按该页实际 DOM 解析即可；
-3) 滚动加载 + 分段读卡片（领英为懒加载，首屏只渲染 6-8 张，不滚动等于白采。2026-10-29 实测：职位列表在**内层窗格**里，直接 cua_scroll 滚窗口无效，必须先把鼠标指针移进列表区域再滚）：
-   a. 先用 cua_execute 执行 move（x=屏宽×0.34 附近、y=500，即左侧职位卡片区域中心），同一次调用里再执行 scroll（x/y 同坐标，scroll_y=1500）。cua_execute 若 provider 超时：等 5 秒后仍执行一次 dom_cua_get_visible_dom（动作可能已落地），然后继续下一屏，不整体放弃；
-   b. 每屏滚动后等 4-6 秒随机（滚动后先出现骨架屏，必须等渲染完再读），再 dom_cua_get_visible_dom 一次；重复 5 屏（共 5 次）；
-   c. 每次读取的卡片按 link 去重累积（LinkedIn 虚拟化列表，滚动后旧卡片会从 DOM 消失，必须分次累积，不能只读最后一次）；若某屏读完没有新增 link，把滚动坐标 y 改 400（列表更靠上位置）重试一次；
-   d. 字段：title、company、location、link（href 含 /jobs/view/，去掉 ? 后参数）、salary（空则「面议」）；累积上限 40 条；
-   e. 不点「分页/加载更多按钮」，只做自然向下滚动；滚动到位后不再回滚、不点任何卡片（滚动可能让右侧自动展开第一个职位详情，无妨，只读左侧列表）。
-4) 写入 .workbuddy/tmp/linkedin-<关键词slug>.json（platform='领英'）；
+【第2步：领英采集（优先公开接口，失败才回退 Edge 登录态）】**首选方式（2026-10-29 实测，强烈推荐）**：领英有面向未登录访客的公开搜索接口，用 browse.exe 直接打开即可拿到完整卡片字段，不依赖登录态、不需要滚动、不受虚拟化列表影响，每页 10 条。
+- 接口：https://www.linkedin.com/jobs-guest/jobs/api/seeMoreJobPostings/search?keywords=<URL编码关键词>&location=<URL编码地点>&f_TPR=r604800&start=<偏移量>
+- 用 browse.exe chain 一次完成「打开→等列表→提取」，提取器用 scripts/extract-linkedin.js（已随仓库提供），start 依次取 0 / 10 / 20（每页 10 条，3 页共 30 条/关键词），每次间隔 6-15 秒随机；
+- 任一页返回空或 429 → 该关键词停止翻页，换下一个关键词；连续两个关键词都 429 → 领英整体放弃本轮（绝不重试）。
+关键词选择：读 keywords_en 全量，去掉括号注释（取括号前部分）得有效词池；读游标 .workbuddy/tmp/linkedin-kw-cursor.txt（无则 0），从游标起循环取 3 个，用完写回 (游标+3) % 池长（轮换，避免每轮只用同 3 个词）。地点取 target_profile.cities_en 第一个，不含「China」则追加「, China」（%2C%20China），缺省 Shanghai%2C%20China。
+**回退方式（接口不可用时）**：mcp__browser__browsers_list 取 Edge 扩展浏览器，tabs_new 打开 https://www.linkedin.com/jobs/search/?keywords=<编码关键词>&location=<地点>&f_TPR=r604800，等 6 秒；页面若重定向到 linkedin.cn 或出现 451/登录页/验证码则放弃（原因记「Edge 未走全局代理」），出现 429 立即放弃。滚动方式：**职位列表在内层窗格，直接把鼠标 move 到列表区域（x≈屏宽×0.34，y=500）再 scroll**，滚 5 屏、每屏等 4-6 秒再 dom_cua_get_visible_dom、按 link 去重累积（上限 40 条）。
+（回退方式下若走 Edge：页面跳转到 cn.linkedin.com 子域不算失败，按该页实际 DOM 解析即可；cookie/广告遮罩可点 × 关闭；滚动后右侧会自动展开第一个职位详情，无妨，只读左侧列表；不点分页按钮、不点任何职位卡。）
+采集结果统一写入 .workbuddy/tmp/linkedin-<关键词slug>.json（platform='领英'）。
 5) 卡片缺链接时用「岗位名+公司名」精确搜索一次补齐 /jobs/view/<id>；仍找不到则在 jd_summary 标注。间隔 sleep 30-60 秒。只读，绝不点职位卡、绝不 Easy Apply。
 
 【第3步：写入岗位池——全状态查重（本步是本任务最关键的约束，必须严格执行）】
+3.0 地点收窄（先做）：只保留 location 含「上海 / Shanghai / 远程 / Remote / 全国」之一的候选，外地一律跳过并计入「外地跳过」数。2026-10-29 实测猎聘 111 条去重后仅 24 条在上海。
 3.1 先取全量存量（不限状态）：mode=read 执行
 SELECT id, company, position, source_url, salary, location, status, match_score FROM jobs WHERE owner_id='<owner_id>' ORDER BY id LIMIT 2000
 【查重范围：全状态】必须把返回的全部记录都放进比对集合，涵盖 待确认 / 待投递 / 已查看 / 已投递 / 面试中 / 不合适 / 已拒绝 等所有状态。绝不能只比对 status='待确认' 的记录——已投递或已拒绝的岗位同样算「已存在」，不得再次作为新岗位写入。
@@ -102,18 +101,16 @@ UPDATE agent_tasks SET status='failed', note='失败原因：运行超时无响�
 3. 执行 js 提取（单行 JSON.stringify）：遍历 document.querySelectorAll('a[data-nick=job-detail-job-info]')，每条取：title = 第一个 div[title] 的 title 属性；link = a.href 去掉 ? 后参数；salary = a 内 span 文本中匹配 /^\d/ 且含 k 或 万 的第一个；location = a.textContent 匹配 /【([^】]+)】/ 的第一段（如「苏州-常熟」，旧版按「区/县/市」结尾匹配会漏掉「xx-xx」格式）；tags = 匹配含「年以下|年以上|本科|硕士|大专|博士」的 span 文本拼接；company = a.closest('div.jobDetailBox')（注意：2026-10 实测卡片没有 li 容器，closest('li') 返回 null）内 [class*=companyNam] 元素的文本。实测避坑：browse 守护进程崩溃后会在 <WORKSPACE>/.gstack/terminal-agent-pid.lock 留下 0 字节残留锁，导致后续所有启动报「Server failed to start」——重试前先删除该锁文件；若环境变量含失效的 HTTP(S)_PROXY，browse 启动时也会失败，需先 unset。
 4. 把 JSON 写入 .workbuddy/tmp/liepin-<关键词slug>.json。若猎聘整体失败（goto 连续异常/验证码），记下失败原因，继续第4步。
 
-【第4步：领英采集（条件执行）】调用 mcp__browser__browsers_list：
-- 若没有 Edge 扩展浏览器（name=Microsoft Edge, type=extension）：跳过领英部分，记下原因「领英未采集：Edge 未连接」。
-- 若有：先做关键词选择：读 keywords_en 全量，去掉括号注释（取括号前部分）得有效词池；读游标 .workbuddy/tmp/linkedin-kw-cursor.txt（无则 0），从游标起循环取 3 个，用完写回 (游标+3)%池长（轮换，避免每轮只用同 3 个词）。构造地点参数：取 target_profile.cities_en 第一个，若不含「China」则在末尾追加「, China」（%2C%20China）；缺省 Shanghai%2C%20China。对每个关键词：
-  1. tabs_new 打开 https://www.linkedin.com/jobs/search/?keywords=<URL编码关键词>&location=<地点>&f_TPR=r604800 ，等 6 秒（近一周。2026-10-29 实测上海 AI Product Manager 近一周 159 个结果，近 3 天口径会让每轮入库只剩个位数；重复由第5步全状态查重兜底）；
-  2. tab_screenshot + tab_url 检查：若 tab_url 被重定向到 linkedin.cn、或页面出现 451/登录页/验证码/认证墙 → 领英整体放弃（不重试、不点击），记下原因「领英重定向到 linkedin.cn：Edge 未走全局代理」；有 cookie/广告遮罩可点 × 关闭；
-  3. 滚动加载 + 分段读卡片（首屏只渲染 6-8 张，必须滚动；职位列表在内层窗格，必须先把鼠标 move 进列表区域再 scroll，直接滚窗口无效）：
-     a. cua_execute：先 move（x=屏宽×0.34 附近，y=500）再 scroll（同坐标，scroll_y=1500）；超时则等 5 秒读一次 DOM 再继续；重复 5 屏，每屏后等 4-6 秒随机（骨架屏渲染完）再 dom_cua_get_visible_dom；
-     b. 按 link 去重累积（虚拟化列表会移除旧卡片，不能只读最后一次）；某屏无新增 link 时把滚动 y 坐标改 400 重试一次；
-     c. 字段：title、company、location、link（href 含 /jobs/view/，去掉 ? 后参数）、salary（为空填「面议」）；累积上限 40 条；
+【第4步：领英采集（优先公开接口，失败才回退 Edge）】**首选（2026-10-29 实测）：领英 jobs-guest 公开接口**，browse.exe 直接打开即可，不依赖登录态、无需滚动、每页 10 条完整字段：
+- URL：https://www.linkedin.com/jobs-guest/jobs/api/seeMoreJobPostings/search?keywords=<URL编码关键词>&location=<URL编码地点>&f_TPR=r604800&start=<偏移量>
+- 用 browse.exe chain 一次完成「goto → wait li → eval scripts/extract-linkedin.js」，start 取 0/10/20 三页（30 条/关键词），页间 sleep 6-15 秒随机；
+- 某页返回空或 429 → 该关键词停止翻页换下一个；连续两词 429 → 领英整体放弃（绝不重试）。
+- 关键词选择：读 keywords_en 全量，去掉括号注释（取括号前部分）得有效词池；读游标 .workbuddy/tmp/linkedin-kw-cursor.txt（无则 0），从游标起循环取 3 个，用完写回 (游标+3)%池长（轮换，避免每轮只用同 3 个词）。地点：取 target_profile.cities_en 第一个，不含「China」则追加「, China」（%2C%20China）；缺省 Shanghai%2C%20China。
+**回退（接口不可用时）**：mcp__browser__browsers_list 取 Edge 扩展浏览器（没有则跳过，记「领英未采集：Edge 未连接」），tabs_new 打开 https://www.linkedin.com/jobs/search/?keywords=<编码关键词>&location=<地点>&f_TPR=r604800 ，等 6 秒。若 tab_url 被重定向到 linkedin.cn、或出现 451/登录页/验证码/认证墙 → 放弃并记「Edge 未走全局代理」；429 → 立即放弃。滚动：**列表在内层窗格**，先用 cua_execute 把鼠标 move 到列表区域（x≈屏宽×0.34，y=500）再 scroll（scroll_y=1500），超时则等 5 秒读一次 DOM 继续；共 5 屏，每屏等 4-6 秒（骨架屏）再 dom_cua_get_visible_dom，按 link 去重累积（上限 40 条）；某屏无新增 link 时把 y 改 400 重试一次。
      d. 不点分页/加载更多按钮，只做自然向下滚动，不点击任何职位卡；
   4. 写入 .workbuddy/tmp/linkedin-<关键词slug>.json（platform='领英'）。
-每个关键词之间 sleep 30-60 秒。全程只读领英页面，绝不点击职位卡、绝不点击 Easy Apply。
+每个关键词之间 sleep 30-60 秒（走公开接口时页间隔 6-15 秒即可，词间隔仍保持）。全程只读，绝不点击职位卡、绝不点击 Easy Apply。
+【地点收窄】写库前只保留上海/远程/全国（location 含「上海 / Shanghai / 远程 / Remote / 全国」之一）；外地岗位一律跳过并在汇总里报数。2026-10-29 实测猎聘单轮 111 条去重后仅 24 条在上海，不加这层过滤会持续稀释清单。
 
 【第5步：写入岗位池——全状态查重（本步是最关键约束，必须严格执行）】
 5.1 先取全量存量（不限状态）：mode=read 执行
