@@ -16,7 +16,7 @@
 - [ ] 粘贴 `samples/demo-jobs.json` 到「智能导入」→ 提示导入 6 条、跳过重复 0 条
 - [ ] 点「🧮 按画像批量打分」→ 6 条岗位出现 0-100 分数与 ≤30 字理由
 - [ ] 3 个定时任务存在，时间分别为 08:00 / 18:00 / 每小时
-- [ ] `bash scripts/check-network.sh` 两条硬断言全过；未过时领英段必须跳过而不是直连抓取
+- [ ] `bash scripts/check-network.sh` 接口实测返回卡片；未过时领英段必须跳过（不抓 linkedin.cn，也不凭 IP 判 CN 就跳过）
 - [ ] 手动点「⚡ 通知 Agent 立即采集」→ `agent_tasks` 出现 1 条 `pending` 记录 → 下一小时检查点消费后变 `done` / `failed`（含原因）
 - [ ] `docs/assets/architecture.svg` 与 `docs/assets/workflow.svg` 存在且被 README 引用（整体架构 + 七步工作流各一张）
 - [ ] 非 WorkBuddy 通道复现时：越权自检返回 0 行（`set_config('app.uid','user-A')` 后读不到 `user-B` 的任何行）
@@ -173,7 +173,7 @@ COMMIT;
 
 1. **身份与存储**：WorkBuddy 账号（需 `applicationId` + `publishableKey`，走 OAuth）还是自建 PG/Supabase（先执行 `schema.sql` + `auth-isolation.sql`，并通过越权自检）
 2. **简历落库策略**：默认脱敏文本 ≤20000 字存 `profiles.resume_text`；用户选「只存画像」则**所有写入不得包含 `resume_text` 字段**
-3. **网络门禁**：运行 `bash scripts/check-network.sh`。两条硬断言全过 → 领英启用；任一失败 → **领英整段跳过，禁止直连降级**，并明确告知用户「当前只能使用猎聘一个岗位来源，领英相关链接可能打不开，属预期行为」
+3. **网络门禁**：运行 `bash scripts/check-network.sh`。判据是**接口实测**——`jobs-guest` 返回 ≥1 条岗位卡片 → 领英启用；`302 → linkedin.cn` / `429` / `451` / 0 条 → **领英整段跳过**（禁止抓 `linkedin.cn`），并明确告知用户「本轮只用猎聘一个来源，原因见运行记录」。出口 IP 只作提示，**不得**据其判定跳过
 
 三问结论写入 `config/config.json` 后再进入正常流程。决策图见 `docs/assets/first-run.svg`，详细说明见 README「首次运行引导」章节。
 
@@ -189,7 +189,7 @@ COMMIT;
 WorkBuddy 的 `mcp__browser__*` 工具在别的环境不存在，采集层按 `docs/10-collect-adapters.md` 的适配表实现：
 
 - 每条来源（猎聘/领英）必须有 **L1 自动 → L2 半自动 → L3 书签兜底** 三条路径，L3（书签复制 JSON + 粘贴导入）永远可用，是「不间断」的最终保证
-- 领英在任何环境都先过 `scripts/check-network.sh` 两条硬断言，不过则整段跳过，禁止直连降级
+- 领英在任何环境都先过 `scripts/check-network.sh`（接口实测：能返回卡片即放行），不过则整段跳过；禁止抓 `linkedin.cn`，禁止仅凭出口 IP 判 CN 就跳过
 - 定时调度用 cron / 任务计划程序替代；同一来源连续失败 2 次自动降级并告知用户
 
 ---
@@ -248,24 +248,23 @@ WorkBuddy 的 `mcp__browser__*` 工具在别的环境不存在，采集层按 `d
 
 ---
 
-## 6. 领英采集的前置门禁（**不满足必须跳过，禁止降级**）
+## 6. 领英采集的前置门禁（**接口实测为准，不满足必须跳过**）
 
-在执行领英段之前，必须依次验证以下两条硬断言，全部通过才允许继续（第三条为辅助判断，不参与门禁）：
+在执行领英段之前，只验证一件事：**接口能不能返回岗位卡片**。出口 IP 属于哪个国家**不再参与判定**（旧判据看 `loc≠CN`，代理一抖动就整天误跳过，2026-11-06 已废弃）。
 
 | # | 断言 | 通过条件 | 不通过时 |
 |---|---|---|---|
-| 1（硬） | 出口 IP 地理判定 | `curl -s https://www.cloudflare.com/cdn-cgi/trace` 中 `loc` ≠ `CN` | 跳过领英，记 `失败原因：出口IP被判CN` |
-| 2（硬） | 领英搜索页状态 | `https://www.linkedin.com/jobs/search/?keywords=<kw>` 返回 **200** | 302 到 `linkedin.cn` → 记 `失败原因：领英重定向linkedin.cn` |
-| 3（辅助） | 出口 IP vs 本机 IP | 仅作提示 | **不要**用它做门禁：TUN 全局模式下两者相同属正常 |
+| 1（硬） | 领英接口返回卡片数 | `jobs-guest` 接口返回 **≥1 条卡片**（脚本用前两个词各试一次） | 0 条 / `302 → linkedin.cn` / `429` / `451` → 记 `领英跳过：<脚本原因>`，退出码 2 |
+| 2（提示） | 出口 IP 与 `loc` | `curl -s https://www.cloudflare.com/cdn-cgi/trace` 里的 `ip=` / `loc=` | **仅打印用于诊断**，不得据此跳过；接口通就采 |
 
 补充约束：
 
 - 页面出现 `451` / authwall / 验证码 → 立即停止，**不重试、不绕过**
-- 每轮 ≤ 3 关键词 × 1 页 × 25 条；词间 30-60s 随机
-- 不翻页、不滚动、不点开职位详情、不点 Easy Apply
+- 领英每轮 ≤ 4 关键词 × 5 页 × 10 条；猎聘 ≤ 3 关键词 × 2 页；页间隔 3s / 词间隔 4s（领英）
+- 不做无限滚动、不点开职位详情、不点 Easy Apply
 - 卡片缺链接时可用「岗位名 + 公司名」精确搜索补齐一次；仍缺则留空并在 `jd_summary` 标注
 
-**绝不允许**：检测到重定向后"改成直连也能打开"就继续抓 —— `linkedin.cn` 是中国区内容，数据不可用。
+**绝不允许**：抓取 `linkedin.cn` 的内容 —— 那是中国区站点，数据不可用。注意区分：直连 `jobs-guest`（领英官方访客接口，返回真实海外岗位）是**主路径**，与「抓 linkedin.cn」是两件事。
 
 ---
 

@@ -633,6 +633,12 @@ function dedupeList(list){
   out.sort(bestFirst);
   return { list: out, hidden };
 }
+/* 新鲜度：48h 内入库标记 NEW 并置顶，避免被高分老岗位长期压住（2026-11-05 新增） */
+const isNewJob = j => { const t = j && j.created_at ? new Date(j.created_at).getTime() : 0; return !!t && (Date.now() - t) < 48*3600*1000; };
+function sortFreshFirst(list){
+  const byScore = (a,b)=>(b.match_score??-1)-(a.match_score??-1);
+  return [...list.filter(isNewJob).sort(byScore), ...list.filter(j=>!isNewJob(j)).sort(byScore)];
+}
 $('#smartImportBtn').onclick = async () => {
   try{
     requireSession();
@@ -826,19 +832,20 @@ $('#triggerCollectBtn').onclick = async () => {
 async function loadPool(){
   try{
     requireSession();
-    const { data } = await cloud.database.from('jobs').select('*').order('created_at',{ascending:false}).limit(500);
+    const { data } = await cloud.database.from('jobs').select('*').order('created_at',{ascending:false}).limit(1000);
     const rawPool = (data||[]).filter(j => j.status === '待确认');
     const { list: pool, hidden } = dedupeList(rawPool);
-    pool.sort((a,b)=>(b.match_score??-1)-(a.match_score??-1));
-    $('#poolCount').innerHTML = `（待确认 ${pool.length} 个）` + (hidden ? ` <span class="muted">· 已折叠 ${hidden} 条重复</span>` : '');
-    $('#poolList').innerHTML = pool.length ? pool.map(jobCard).join('') : '<div class="empty">岗位池为空，先去粘贴几个猎聘职位描述吧 👆</div>';
+    const sortedPool = sortFreshFirst(pool);
+    $('#poolCount').innerHTML = `（待确认 ${sortedPool.length} 个）` + (hidden ? ` <span class="muted">· 已折叠 ${hidden} 条重复</span>` : '');
+    $('#poolList').innerHTML = sortedPool.length ? sortedPool.map(jobCard).join('') : '<div class="empty">岗位池为空，先去粘贴几个猎聘职位描述吧 👆</div>';
     document.querySelectorAll('[data-del]').forEach(b => b.onclick = () => delJob(b.dataset.del));
   }catch(e){}
 }
 function jobCard(j){
   const score = j.match_score != null ? `<span class="score">匹配度 ${j.match_score}</span>` : '<span class="muted">未打分</span>';
+  const fresh = isNewJob(j) ? '<span class="badge" style="background:#FFF4D6;color:#8A6D3B">NEW</span> ' : '';
   return `<div class="job">
-    <div class="head"><span><span class="plat plat-${esc(j.platform||'猎聘')}">${esc(j.platform||'猎聘')}</span> <span class="company">${esc(j.company)}</span> · <span class="pos">${esc(j.position)}</span></span><span>${score} <span class="badge st-${esc(j.status)}">${esc(j.status)}</span></span></div>
+    <div class="head"><span><span class="plat plat-${esc(j.platform||'猎聘')}">${esc(j.platform||'猎聘')}</span> <span class="company">${esc(j.company)}</span> · <span class="pos">${esc(j.position)}</span></span><span>${fresh}${score} <span class="badge st-${esc(j.status)}">${esc(j.status)}</span></span></div>
     <div class="meta"><span>💰 ${esc(j.salary||'面议')}</span><span>📍 ${esc(j.location||'未提及')}</span>${j.match_reason?`<span>🧮 ${esc(j.match_reason)}</span>`:''}</div>
     <div class="summary">${esc(j.jd_summary||'')}</div>
     <div class="row">${j.source_url?`<a class="muted" href="${esc(j.source_url)}" target="_blank" rel="noopener">🔗 打开职位链接</a>`:''}<button class="btn danger small" data-del="${j.id}">删除</button></div>
@@ -855,18 +862,22 @@ async function delJob(id){
 async function loadConfirm(){
   try{
     requireSession();
-    const { data } = await cloud.database.from('jobs').select('*').order('match_score',{ascending:false}).limit(200);
+    // 2026-11-05 修正：原实现先按 match_score 全库取前 200 再按状态过滤，
+    // 待确认超过 200 条后新采的低分岗位永远进不了榜（当天 80 条新增只有 18 条可见）。
+    // 现改为：取最近入库的 1000 条 → 按状态分组 → 组内 48h 新增置顶，再按匹配度排。
+    const { data } = await cloud.database.from('jobs').select('*').order('created_at',{ascending:false}).limit(1000);
     const all = data||[];
-    const pending = dedupeList(all.filter(j=>j.status==='待确认')).list.sort((a,b)=>(b.match_score??-1)-(a.match_score??-1));
-    const ready = dedupeList(all.filter(j=>j.status==='待投递')).list.sort((a,b)=>(b.match_score??-1)-(a.match_score??-1));
+    const pending = sortFreshFirst(dedupeList(all.filter(j=>j.status==='待确认')).list);
+    const ready = sortFreshFirst(dedupeList(all.filter(j=>j.status==='待投递')).list);
     const skipped = dedupeList(all.filter(j=>j.status==='不合适')).list.sort((a,b)=>(b.match_score??-1)-(a.match_score??-1));
-    $('#cntPending').textContent = pending.length;
+    const freshCount = pending.filter(isNewJob).length;
+    $('#cntPending').textContent = freshCount ? `${pending.length}（近48h +${freshCount}）` : pending.length;
     $('#cntDone').textContent = ready.length;
     $('#cntSkip').textContent = skipped.length;
     $('#confirmList').innerHTML = pending.length ? pending.map(j=>`
       <div class="job">
         <div class="head"><span><label><input type="checkbox" class="pick" value="${j.id}"><span class="plat plat-${esc(j.platform||'猎聘')}">${esc(j.platform||'猎聘')}</span> <span class="company">${esc(j.company)}</span> + <span class="pos">${esc(j.position)}</span></label></span>
-        <span>${j.match_score!=null?`<span class="score">匹配度 ${j.match_score}</span>`:''} <span class="badge st-待确认">待确认</span></span></div>
+        <span>${j.match_score!=null?`<span class="score">匹配度 ${j.match_score}</span>`:''} ${isNewJob(j)?'<span class="badge" style="background:#FFF4D6;color:#8A6D3B">NEW</span>':''} <span class="badge st-待确认">待确认</span></span></div>
         <div class="meta"><span>💰 岗位预算：${esc(j.salary||'面议')}</span><span>📍 工作地点：${esc(j.location||'未提及')}</span><span>🏷️ 岗位来源：<b>${esc(j.platform||'猎聘')}</b></span>${j.source_url?`<span>🔗 <a href="${esc(j.source_url)}" target="_blank" rel="noopener" style="color:var(--brand)">打开职位详情页</a></span>`:'<span class="muted">🔗 暂无链接，可凭公司+岗位名到对应平台搜索</span>'}${j.match_reason?`<span>🧮 ${esc(j.match_reason)}</span>`:''}</div>
         <div class="summary">📄 JD摘要：${esc(j.jd_summary||'')}</div>
         <div class="row">

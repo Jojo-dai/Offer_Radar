@@ -1,116 +1,66 @@
 #!/usr/bin/env bash
 # ============================================================
-# 领英可达性自检
-#   硬断言（全过才允许跑领英）：
-#     1) 出口 IP 地理判定不是 CN
-#     2) 领英搜索页跟随站内跳转后仍可访问（200 / 或 401·403 表示需登录），且最终不落 linkedin.cn
-#        —— 注意：linkedin.com 会把 /jobs/search/?keywords=... 301 到 /jobs/xxx-jobs 这类
-#           SEO 规范化地址，这是正常站内跳转，不是封锁，不能判失败
-#   辅助判定（仅提示，不参与退出码）：
-#     3) 出口 IP 与本机直连 IP 的关系（TUN 全局模式下两者相同是正常现象）
+# 领英可达性自检（2026-11-06 重构：以接口实测为准，不再用 IP 国家做硬断言）
 #
-# 用法：bash scripts/check-network.sh [socks|http] [host:port]
-# 退出码：0 = 允许跑领英；1 = 必须跳过
+# 为什么改：旧的硬断言是「出口 IP 地理判定必须不是 CN」。
+#   实测中代理抖动 / DNS 分流 / IPv6 出口都会让 IP 判定失真——
+#   11-06 两轮采集都因 IP 判为 CN 直接放弃领英，结果当天领英 0 条，
+#   而当时 jobs-guest 接口其实是可用的。
+#
+# 现在的判据（唯一硬断言）：
+#   直接请求 jobs-guest 接口，能解析出 ≥1 条岗位卡片 → 允许采集。
+#   IP、DNS、跳转只作为辅助信息打印，不影响结论。
+#
+# 用法：bash scripts/check-network.sh
+# 退出码：0 = 允许跑领英；1 = 必须跳过（接口 302→linkedin.cn / 429 / 451 / 0 条）
 # ============================================================
 set -u
 
-MODE="${1:-auto}"
-PROXY="${2:-}"
-FAIL=0
+UA="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0 Safari/537.36"
+PROBE_URL='https://www.linkedin.com/jobs-guest/jobs/api/seeMoreJobPostings/search?keywords=SAP%20BPC&location=Shanghai%2C%20China&f_TPR=r604800&start=0'
 
 say() { printf '%s\n' "$*"; }
-ok()  { say "  ✅ $*"; }
-bad() { FAIL=$((FAIL+1)); say "  ❌ $*"; }
-
-# ---- 选择代理（只影响本次 curl，不改本机配置） ----
-CURL_PROXY=()
-if [ -n "$PROXY" ]; then
-  case "$MODE" in
-    socks) CURL_PROXY=(--socks5-hostname "$PROXY") ;;
-    *)     CURL_PROXY=(-x "http://$PROXY") ;;
-  esac
-  say "使用代理：$MODE $PROXY"
-else
-  for p in 127.0.0.1:7897 127.0.0.1:7890 127.0.0.1:10809 127.0.0.1:8080; do
-    if (exec 3<>"/dev/tcp/127.0.0.1/${p##*:}") 2>/dev/null; then
-      CURL_PROXY=(-x "http://$p"); say "自动探测到本地代理：$p"; break
-    fi
-  done
-  [ ${#CURL_PROXY[@]} -eq 0 ] && say "未探测到本地代理（TUN 模式下无需指定，直接测试）"
-fi
-
-# 统一绕过 shell 环境里的 http(s)_proxy，避免测试目标被污染
-BASE=(curl -s --noproxy '*' --max-time 20 "${CURL_PROXY[@]}")
 
 say ""
-say "=== 硬断言 1：出口 IP 的地理判定不能是 CN ==="
-TRACE=$("${BASE[@]}" https://www.cloudflare.com/cdn-cgi/trace 2>/dev/null || true)
+say "=== 辅助信息：出口 IP（仅提示，不再作为硬断言） ==="
+TRACE=$(curl -s --max-time 15 https://www.cloudflare.com/cdn-cgi/trace 2>/dev/null || true)
 IP=$(printf '%s\n' "$TRACE" | awk -F= '/^ip=/{print $2}')
 LOC=$(printf '%s\n' "$TRACE" | awk -F= '/^loc=/{print $2}')
-COLO=$(printf '%s\n' "$TRACE" | awk -F= '/^colo=/{print $2}')
-say "  ip=${IP:-读取失败}  loc=${LOC:-未知}  colo=${COLO:-未知}"
-if [ -z "${IP:-}" ]; then
-  bad "拿不到出口 IP：代理未接管 / 不通"
-elif [ "$LOC" = "CN" ]; then
-  bad "出口被判为中国大陆（loc=CN）→ 领英会 302 到 linkedin.cn"
-else
-  ok "出口地区 ${LOC}（非 CN）"
+say "  ip=${IP:-读取失败}  loc=${LOC:-未知}"
+if [ "${LOC:-}" = "CN" ]; then
+  say "  ℹ️ 出口判为中国大陆：通常会被 302 到 linkedin.cn，但以接口实测为准"
 fi
 
 say ""
-say "=== 硬断言 2：领英搜索页必须可访问（跟随站内跳转后为 200） ==="
-RES=$(curl -sL --noproxy '*' --max-time 30 "${CURL_PROXY[@]}" \
-      -o /dev/null -w '%{http_code} %{url_effective} %{num_redirects}' \
-      'https://www.linkedin.com/jobs/search/?keywords=AI%20Product%20Manager&location=Shanghai%2C%20China&f_TPR=r604800' 2>/dev/null || true)
-CODE=$(printf '%s' "$RES" | awk '{print $1}')
-FINAL=$(printf '%s' "$RES" | awk '{print $2}')
-NRED=$(printf '%s' "$RES" | awk '{print $3}')
-say "  最终 HTTP=${CODE:-无}  跳转次数=${NRED:-0}  最终地址=${FINAL:-无}"
-if printf '%s' "$FINAL" | grep -q 'linkedin\.cn'; then
-  bad "最终落到 linkedin.cn：出口被判 CN，或 linkedin.com 被分流走直连"
-else
-  if printf '%s' "$FINAL" | grep -q 'cn\.linkedin\.com'; then
-    say "  ⚠️ 被导向 cn.linkedin.com（领英中国区子域）：页面结构与主站不同，"
-    say "     采集时必须按该子域的实际 DOM 解析；若此处返回 429，说明该子域正在限流"
-  fi
-  case "$CODE" in
-    200) ok "领英搜索页可访问（已跟随 ${NRED:-0} 次跳转；linkedin.com 对未登录访客做 SEO 规范化跳转属正常）" ;;
-    401|403)
-         ok "返回 ${CODE}：站点可达但要求登录 → 需在 Edge 里登录领英（采集前确认登录态）" ;;
-    429) bad "429 限流：该出口 IP 近期请求过多，请等待 30-60 分钟再试，期间不要采集（重试只会加重限流）" ;;
-    451) bad "451：区域限制（IP 被判中国大陆）" ;;
-    999) bad "999：领英风控（请求特征被拦）" ;;
-    000) bad "无响应：代理不通或超时" ;;
-    *)   bad "返回 ${CODE}（非 200，且未落到 linkedin.cn，需人工确认）" ;;
-  esac
-fi
+say "=== 硬断言：jobs-guest 接口必须返回岗位卡片 ==="
+BODY=$(curl -s --max-time 30 -A "$UA" -w '\n__STATUS__%{http_code}__URL__%{url_effective}' "$PROBE_URL" 2>/dev/null || true)
+STATUS=$(printf '%s' "$BODY" | sed -n 's/.*__STATUS__\([0-9]*\)__URL__.*/\1/p')
+FINAL=$(printf '%s' "$BODY" | sed -n 's/.*__STATUS__[0-9]*__URL__//p')
+CARDS=$(printf '%s' "$BODY" | grep -o 'base-search-card__title' | wc -l | tr -d ' ')
+say "  HTTP=${STATUS:-无}  卡片=${CARDS:-0}"
+say "  最终地址=${FINAL:-无}"
 
-say ""
-say "=== 辅助判定 3：出口 IP 与本机直连 IP 的关系（仅提示） ==="
-DIRECT_IP=$(curl -s --noproxy '*' --max-time 15 https://ipinfo.io/ip 2>/dev/null || true)
-say "  直连 IP=${DIRECT_IP:-读取失败}  代理出口 IP=${IP:-读取失败}"
-if [ -z "${DIRECT_IP:-}" ]; then
-  say "  ℹ️ 直连 IP 读取失败（本机可能被墙），跳过该判定"
-elif [ "${DIRECT_IP}" = "${IP:-}" ]; then
-  say "  ℹ️ 两者相同：TUN 全局模式下属正常（所有流量都进隧道）；"
-  say "     但若是「系统代理模式」且仍相同，则说明流量漏回直连 —— 以硬断言 1、2 为准"
-else
-  say "  ℹ️ 两者不同：隧道已生效"
-fi
-
-say ""
-say "================ 结论 ================"
-if [ "$FAIL" -eq 0 ]; then
-  say "✅ 硬断言全部通过：允许执行领英采集"
-  exit 0
-else
-  say "⛔ 有 ${FAIL} 项硬断言未通过：本轮必须跳过领英采集并记录失败原因；"
-  say "   严禁改成直连继续抓取（linkedin.cn 是中国区内容，数据不可用）。"
+if printf '%s' "${FINAL:-}" | grep -q 'linkedin\.cn'; then
   say ""
-  say "修复顺序："
-  say "  1) 开启 TUN 模式，或确认系统代理真正接管流量"
-  say "  2) Fake-IP 必须与 TUN 配对；只开 Fake-IP 不开 TUN 会全部漏回直连"
-  say "  3) 分流规则里 linkedin.com 不能走直连（切全局或加白名单）"
-  say "  4) 换节点：优先美国 IPv4 出口，避开被判 CN 的亚太 IPv6 段"
+  say "⛔ 接口被重定向到 linkedin.cn（中国区站点）：本轮跳过领英"
+  say "   修复：开启 TUN 全局 / 确认 linkedin.com 不走直连 / 换美国节点"
   exit 1
 fi
+
+case "${STATUS:-}" in
+  200)
+    if [ "${CARDS:-0}" -gt 0 ]; then
+      say ""
+      say "================ 结论 ================"
+      say "✅ 接口可用（返回 ${CARDS} 条卡片）：允许执行领英采集"
+      exit 0
+    fi
+    say ""
+    say "⛔ 接口 200 但 0 条卡片：关键词或地区无结果，或页面结构变化 → 跳过并记录"
+    exit 1
+    ;;
+  429) say ""; say "⛔ 429 限流：等 30-60 分钟再试，期间不要采集（重试只会加重限流）"; exit 1 ;;
+  451) say ""; say "⛔ 451 区域限制：换节点后重试"; exit 1 ;;
+  000) say ""; say "⛔ 无响应：网络不通"; exit 1 ;;
+  *)   say ""; say "⛔ 返回 ${STATUS:-未知}：跳过领英并记录原因"; exit 1 ;;
+esac

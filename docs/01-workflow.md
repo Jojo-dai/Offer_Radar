@@ -108,20 +108,20 @@ user  : <脱敏后的简历文本> + <你的补充说明>
 **猎聘采集**（无头浏览器）
 
 ```
-3 个中文关键词 → https://www.liepin.com/zhaopin/?key=<kw>
+3 个中文关键词（按游标轮换）→ https://www.liepin.com/zhaopin/?key=<kw>&currentPage=<1|2>
   → 等 5s → 提取 a[data-nick=job-detail-job-info]
       title / link / salary / location / tags / company
-  → 每词约 40 条 → 写 .workbuddy/tmp/liepin-<kw>.json
+  → 每页约 40 条、每词 2 页 → 写 .workbuddy/tmp/liepin-<kw>-p<page>.json
 ```
 
-**领英采集**（你的真实 Edge）
+**领英采集**（直连 jobs-guest 访客接口，不开浏览器）
 
 ```
-前置门禁（见 docs/06-network.md）
-3 个英文关键词 → /jobs/search/?keywords=<kw>&location=<cities_en[0]>
-  → 截图 + 读可见 DOM → 每词最多 25 条
-  → 卡片缺链接时用「岗位名 + 公司名」精确搜索补齐一次
-  → 写 .workbuddy/tmp/linkedin-<kw>.json
+前置门禁（接口实测，见 docs/06-network.md）：返回 ≥1 条卡片即放行
+4 个英文关键词（按游标轮换）→ jobs-guest/api/seeMoreJobPostings/search?keywords=<kw>&location=<cities_en[0]>&f_TPR=r604800&start=<0|10|20|30|40>
+  → python job-apply-agent/scripts/collect-linkedin-guest.py --keywords "..." --pages 5
+  → 每词 5 页 × 10 条，约 200 条/轮，2-3 分钟
+  → 写 .workbuddy/tmp/li-page-<slug>-<start>.json
 ```
 
 **入库（全状态查重，本流程最容易做错的一步）**

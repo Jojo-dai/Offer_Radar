@@ -38,18 +38,21 @@ node collect_liepin.js   # 打开搜索结果页 → 解析 .job-card 节点 →
 
 ### 领英（门禁不因环境而变）
 
+采集方式自 2026-11-06 改为**直连 `jobs-guest` 访客接口**：不依赖登录态、不开浏览器，纯 `urllib` 请求即可，任何能跑 Python 的环境都能用（这是最省依赖的一条通道）。
+
 | 环境 | L1 自动 | L2 半自动 | L3 手动 |
 |---|---|---|---|
-| WorkBuddy | ✅ 定时任务 + 用户真实 Edge + 代理门禁（现行为） | ✅ 对话触发 | ✅ [书签](collect/linkedin-bookmarklet.md) |
-| Claude Code / Codex | ⚠️ Playwright 接管用户真实浏览器 profile + 系统代理 | ✅ 同左 | ✅ 同左 |
+| WorkBuddy | ✅ 定时任务 + `scripts/collect-linkedin-guest.py` 直连接口（现行为） | ✅ 对话触发 | ✅ [书签](collect/linkedin-bookmarklet.md) |
+| Claude Code / Codex | ✅ 同一脚本，`python` 直接跑；可选 Playwright 接管真实浏览器作回退 | ✅ 同左 | ✅ 同左 |
 | 纯人工 | — | — | ✅ 书签 |
 
 **其他 Agent 的领英采集要点**：
 
-1. **先过门禁再谈采集**：`bash scripts/check-network.sh` 两条硬断言（出口 loc≠CN + LinkedIn 返回 200）不过，领英整段跳过——**任何环境都不允许直连降级**
-2. **必须用用户真实浏览器 profile**（Playwright `launchPersistentContext` 指向用户 Chrome/Edge 的 user-data-dir，或 CDP 接管已打开的浏览器），因为领英登录态和风控都在真实指纹上；新建无头指纹容易触发验证
-3. 只读搜索结果页，绝不点击 Easy Apply（与 WorkBuddy 版纪律一致）
-4. 无条件满足 → 只保留猎聘一个来源，并明确告知用户
+1. **门禁判据是接口实测，不是出口 IP**：脚本先用 2 个词试探，`jobs-guest` 返回 ≥1 条卡片就放行；`302 → linkedin.cn` / `429` / `451` / 0 条才跳过（退出码 2）。出口 IP 只打印提示，**不参与判定**
+2. **绝不抓 `linkedin.cn`**：那是中国区站点，内容不是真实海外岗位；重定向到 `.cn` 一律视为失败并跳过
+3. **回退路径**（仅当接口 200 但解析 0 条）：Playwright 用 `launchPersistentContext` 指向用户真实 Chrome/Edge 的 user-data-dir，只读搜索结果页
+4. **频率**：4 词 × 5 页/轮，页间隔 3 秒、词间隔 4 秒，单日 2 轮 —— 换成别的环境也不许提高
+5. 门禁始终不通过 → 只保留猎聘一个来源，并明确告知用户
 
 ## 2. 定时调度替代方案
 

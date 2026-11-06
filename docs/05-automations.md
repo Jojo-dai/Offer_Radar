@@ -5,6 +5,35 @@
 > - 任务 1：采集（早）`FREQ=DAILY;BYHOUR=8;BYMINUTE=0`
 > - 任务 2：采集（晚）`FREQ=DAILY;BYHOUR=18;BYMINUTE=0`
 > - 任务 3：检查点 `FREQ=HOURLY;INTERVAL=1`
+
+## 2026-11-06 领英采集重构（永久解决"领英抓不到"）
+
+11-06 两轮采集（09:13 补跑、18:09 定时）都只进了猎聘、领英 0 条。原因不是关键词，而是**门禁判据错了**：旧规则先看"出口 IP 地理判定是否为 CN"，是 CN 就直接整段放弃领英；当天出口是上海电信 IP，于是两条腿全断，而实际上 jobs-guest 接口当时可用。
+
+| 项目 | 旧 | 新 |
+|---|---|---|
+| 门禁判据 | 出口 IP 不是 CN 且 linkedin.com 返回 200 | **接口实测**：jobs-guest 返回 ≥1 条卡片就放行；302→linkedin.cn / 429 / 451 / 0 条才跳过 |
+| 采集方式 | browse.exe 开浏览器 → 提取（90 条 / 5 分 26 秒） | `job-apply-agent/scripts/collect-linkedin-guest.py` 直连 HTTP（200 条 / 2 分 40 秒） |
+| 每词页数 | 3 页（30 条） | **5 页（50 条）**，实测 start=40 仍有结果 |
+| 每轮词数 | 3 个 | **4 个**（单轮上限 90 → 200 条） |
+| 词池轮换周期 | 3 词/轮 → 5 轮 2.5 天 | 4 词/轮 → 4 轮 2 天 |
+
+> 查重规则仍然一个字未动：全状态、永久、不设时间窗。本次只改"怎么抓"和"什么时候允许抓"，不改"抓回来怎么判重"。
+>
+> 配套脚本：`job-apply-agent/scripts/collect-linkedin-guest.py`（采集，退出码 2 = 接口不可用）、`job-apply-agent/scripts/check-network.sh`（自检，同一口径）。两者都以接口返回为准，IP 只做提示信息打印。
+
+## 2026-11-05 关键词重估（v2）
+
+用户反馈「岗位池里没有新的、不一样的岗位进来」，排查结论是**关键词偏科 + 前端只展示高分前 200 条**，不是采集坏了。本次调整只动两处，**查重规则一字未改**：
+
+| 项目 | 旧 | 新 |
+|---|---|---|
+| 中文词池 | 15 词，猎聘固定只用前 3 个（全面预算/BPC/SAP BPC），不翻页 | 15 词按游标轮换（含 SAP 顾问、SAP 项目经理、SAP 实施顾问、财务数字化、EPM 预算等），每词 2 页 |
+| 英文词池 | 含裸词 `Project Manager`，轮到即涌入大量无关岗 | 换成 `SAP Project Manager`、`SAP Senior Consultant`、`SAP Consultant`、`SAP S/4HANA Finance`、`BPC Consultant`、`FP&A Manager` 等限定词；泛词自动加 `SAP ` 前缀 |
+| 查重 | 全状态、永久 | **完全不变**（见下方红线） |
+
+> 这些 SAP 字眼同时作为**相关性首选标记**：打分时岗位标题/摘要命中 SAP BPC、SAP Project Manager、SAP Senior Consultant 等，视为强相关证据；但**不作为硬过滤**——不命中不等于丢弃，避免又回到"筛得太严"的老问题。
+
 >
 > 任务 1 与任务 2 的 prompt **完全相同**（内容与时间无关），只是 RRULE 不同。
 
@@ -15,7 +44,7 @@
 **RRULE**：`FREQ=DAILY;BYHOUR=8;BYMINUTE=0`（早） / `FREQ=DAILY;BYHOUR=18;BYMINUTE=0`（晚）
 
 ```text
-这是「投递助手」的定时自动采集+打分任务（工作区 <WORKSPACE>）。目标：① 用无头浏览器采集猎聘在招岗位；② 用 WorkBuddy 浏览器控制在用户已登录的真实 Edge 里低频采集领英（LinkedIn）搜索结果；③ 全部与云数据库全量去重后入库；④ 对新入库岗位按 JEV 方法论自动打分；⑤ 把本轮运行登记到 agent_tasks 表；最后给用户发简短汇总。全程只读网页，绝不点击投递、发消息或修改任何设置。
+这是「投递助手」的定时自动采集+打分任务（工作区 <WORKSPACE>）。目标：① 用无头浏览器采集猎聘在招岗位；② 用脚本直连领英 jobs-guest 公开接口采集领英（LinkedIn）搜索结果（不依赖登录态与浏览器）；③ 全部与云数据库全量去重后入库；④ 对新入库岗位按 JEV 方法论自动打分；⑤ 把本轮运行登记到 agent_tasks 表；最后给用户发简短汇总。全程只读网页，绝不点击投递、发消息或修改任何设置。
 
 【状态口径（全局统一，必须遵守）】
 - 已完成：status='done'，note=统计摘要（如：猎聘入库N1条/领英入库N2条/重复M个/打分K条）。
@@ -31,24 +60,26 @@
 
 【第0.5步：登记运行记录】mode=write 执行：INSERT INTO agent_tasks (owner_id, owner_name, type, status, note) VALUES ('<owner_id>', '<owner_name>', 'collect_scheduled', 'processing', '定时采集运行中')。再 mode=read：SELECT id FROM agent_tasks WHERE owner_id='<owner_id>' AND type='collect_scheduled' AND status='processing' ORDER BY requested_at DESC LIMIT 1，记下 run_id。
 
-【第1步：猎聘无头采集】取最多 3 个中文关键词构造 URL：https://www.liepin.com/zhaopin/?key=<URL编码关键词>。每个关键词依次（间隔 sleep 30-60 秒）：
+【第1步：猎聘无头采集】**关键词按游标轮换（2026-11-05 新增，防止固定 3 词吃干第一页）**：读 profiles.keywords（中文）全量得词池（当前 15 个：SAP BPC / SAP 顾问 / SAP 项目经理 / SAP 实施顾问 / 全面预算 / 合并报表 / 业财一体化 / 财务数字化 / EPM 预算 / AI 产品经理 / 企业级 AI / 大模型应用 / 数字化转型 / 解决方案架构师 / 数据产品经理）；读游标 `.workbuddy/tmp/liepin-kw-cursor.txt`（无则 0），从游标起循环取 3 个，用完写回 `(游标+3) % 池长`——15 个词约 5 轮（2.5 天）全部轮到一次。
+每个关键词取 2 页：`https://www.liepin.com/zhaopin/?key=<URL编码关键词>&currentPage=<1|2>`（翻页参数以站点实测为准：若第 2 页结果与第 1 页完全重复，则该词只算 1 页，并在汇总注明「翻页无效」）。每个关键词依次（间隔 sleep 30-60 秒）：
 用 /c/Users/<USER>/.workbuddy/skills/gstack/browse/dist/browse.exe：1) goto 该 URL（含 Server failed 则重试一次）；2) sleep 5；3) 执行 js 提取（单行 JSON.stringify）：遍历 document.querySelectorAll('a[data-nick=job-detail-job-info]')，取 title=第一个 div[title] 的 title 属性；link=a.href 去掉 ? 后参数；salary=a 内 span 文本匹配 /^\d/ 且含 k 或 万 的第一个；location=以 区/县/市 结尾的第一个 span 文本；tags=含「年以下|年以上|本科|硕士|大专|博士」的 span 文本拼接；company=a.closest('li') 内 [class*=companyName] 或 [data-nick*=company] 的文本；4) 写入 .workbuddy/tmp/liepin-<关键词slug>.json。0 条则记录后继续。
 
-【第2步：领英采集（优先公开接口，失败才回退 Edge 登录态）】**首选方式（2026-10-29 实测，强烈推荐）**：领英有面向未登录访客的公开搜索接口，用 browse.exe 直接打开即可拿到完整卡片字段，不依赖登录态、不需要滚动、不受虚拟化列表影响，每页 10 条。
-- 接口：https://www.linkedin.com/jobs-guest/jobs/api/seeMoreJobPostings/search?keywords=<URL编码关键词>&location=<URL编码地点>&f_TPR=r604800&start=<偏移量>
-- 用 browse.exe chain 一次完成「打开→等列表→提取」，提取器用 scripts/extract-linkedin.js（已随仓库提供），start 依次取 0 / 10 / 20（每页 10 条，3 页共 30 条/关键词），每次间隔 6-15 秒随机；
-- 任一页返回空或 429 → 该关键词停止翻页，换下一个关键词；连续两个关键词都 429 → 领英整体放弃本轮（绝不重试）。
-关键词选择：读 keywords_en 全量，去掉括号注释（取括号前部分）得有效词池；读游标 .workbuddy/tmp/linkedin-kw-cursor.txt（无则 0），从游标起循环取 3 个，用完写回 (游标+3) % 池长（轮换，避免每轮只用同 3 个词）。地点取 target_profile.cities_en 第一个，不含「China」则追加「, China」（%2C%20China），缺省 Shanghai%2C%20China。
-**回退方式（接口不可用时）**：mcp__browser__browsers_list 取 Edge 扩展浏览器，tabs_new 打开 https://www.linkedin.com/jobs/search/?keywords=<编码关键词>&location=<地点>&f_TPR=r604800，等 6 秒；页面若重定向到 linkedin.cn 或出现 451/登录页/验证码则放弃（原因记「Edge 未走全局代理」），出现 429 立即放弃。滚动方式：**职位列表在内层窗格，直接把鼠标 move 到列表区域（x≈屏宽×0.34，y=500）再 scroll**，滚 5 屏、每屏等 4-6 秒再 dom_cua_get_visible_dom、按 link 去重累积（上限 40 条）。
-（回退方式下若走 Edge：页面跳转到 cn.linkedin.com 子域不算失败，按该页实际 DOM 解析即可；cookie/广告遮罩可点 × 关闭；滚动后右侧会自动展开第一个职位详情，无妨，只读左侧列表；不点分页按钮、不点任何职位卡。）
-采集结果统一写入 .workbuddy/tmp/linkedin-<关键词slug>.json（platform='领英'）。
+【第2步：领英采集（直连 jobs-guest 公开接口，2026-11-06 重构）】**唯一主路径**：用脚本 `job-apply-agent/scripts/collect-linkedin-guest.py` 直连领英访客接口，不开浏览器、不依赖登录态。实测 200 条约 2 分 40 秒（旧 browse.exe 通道 90 条约 5 分半）。
+- 门禁**不再看出口 IP**：脚本内置探针，先请求一次接口，返回 ≥1 条卡片即放行；302→linkedin.cn / 429 / 451 / 0 条才跳过。跑之前也可单独执行 `bash job-apply-agent/scripts/check-network.sh` 自检（同样是接口实测口径）。
+- 调用：`python job-apply-agent/scripts/collect-linkedin-guest.py --keywords "<词1>,<词2>,<词3>,<词4>" --pages 5 --out .workbuddy/tmp`，退出码 2 = 接口不可用，此时跳过领英并在 note 写明原因，不要重试、不要改走直连。
+- 每关键词 **5 页**（start=0/10/20/30/40，每页 10 条，实测第 5 页仍有结果）；某页不足 10 条自动停该词的翻页；页间隔 3 秒、词间隔 4 秒，脚本已内置。
+- **每轮取 4 个关键词**（旧口径 3 个）：单轮上限 200 条，是旧口径（3×3×10=90）的 2.2 倍。
+关键词选择：读 keywords_en 全量，去掉括号注释（取括号前部分）得有效词池（当前 15 个：SAP BPC / SAP Project Manager / SAP Senior Consultant / SAP Consultant / SAP S/4HANA Finance / BPC Consultant / Comprehensive Budget Management / Business Planning and Consolidation / AI Product Manager / Enterprise AI Solutions / Digital Transformation / Large Language Model(LLM) / RAG / Multi-Agent Systems / FP&A Manager）；读游标 `.workbuddy/tmp/linkedin-kw-cursor.txt`（无则 0），从游标起循环取 4 个，用完写回 (游标+4) % 池长——15 词约 4 轮（2 天）全部轮到一次。
+**泛词护栏**：取到的词若不含 SAP / BPC / AI / LLM / Digital 等限定前缀且属于 Project Manager、Consultant、Product Manager 这类泛词，自动拼成「SAP + 原词」再搜；带限定词的保持原样。地点取 target_profile.cities_en 第一个，不含「China」则追加「, China」，缺省 Shanghai, China（脚本 --location 参数）。
+**回退方式（仅当脚本因解析结构变化返回 0 条、且接口本身 200 可用时）**：mcp__browser__browsers_list 取 Edge 扩展浏览器，tabs_new 打开 https://www.linkedin.com/jobs/search/?keywords=<编码关键词>&location=<地点>&f_TPR=r604800，等 6 秒；页面若重定向到 linkedin.cn 或出现 451/登录页/验证码则放弃；429 立即放弃。滚动：把鼠标 move 到列表区域（x≈屏宽×0.34，y=500）再 scroll，滚 5 屏、每屏等 4-6 秒再 dom_cua_get_visible_dom、按 link 去重累积（上限 40 条）。此路径只做兜底，不要每轮都走。
+采集结果由脚本写入 .workbuddy/tmp/li-page-<slug>-<start>.json（platform='领英'；脚本输出已按 3.x 步所需的 title/company/location/link 字段对齐）。
 5) 卡片缺链接时用「岗位名+公司名」精确搜索一次补齐 /jobs/view/<id>；仍找不到则在 jd_summary 标注。间隔 sleep 30-60 秒。只读，绝不点职位卡、绝不 Easy Apply。
 
 【第3步：写入岗位池——全状态查重（本步是本任务最关键的约束，必须严格执行）】
 3.0 地点收窄（先做）：只保留 location 含「上海 / Shanghai / 远程 / Remote / 全国」之一的候选，外地一律跳过并计入「外地跳过」数。2026-10-29 实测猎聘 111 条去重后仅 24 条在上海。
 3.1 先取全量存量（不限状态）：mode=read 执行
 SELECT id, company, position, source_url, salary, location, status, match_score FROM jobs WHERE owner_id='<owner_id>' ORDER BY id LIMIT 2000
-【查重范围：全状态】必须把返回的全部记录都放进比对集合，涵盖 待确认 / 待投递 / 已查看 / 已投递 / 面试中 / 不合适 / 已拒绝 等所有状态。绝不能只比对 status='待确认' 的记录——已投递或已拒绝的岗位同样算「已存在」，不得再次作为新岗位写入。
+【查重范围：全状态】必须把返回的全部记录都放进比对集合，涵盖 待确认 / 待投递 / 已查看 / 已投递 / 面试中 / 不合适 / 已拒绝 等所有状态。绝不能只比对 status='待确认' 的记录——已投递或已拒绝的岗位同样算「已存在」，不得再次作为新岗位写入。**此条为最高优先级硬约束（用户 2026-11-05 再次确认）：任何关键词、翻页或流程优化都不得放宽，也不得改成"仅比对近 N 天"。**
 3.2 规范化函数（用于生成岗位键）：把公司名、岗位名分别处理——转小写 → 删除「招聘/诚聘/急招/热招/岗位名称/职位名称/岗位/职位」等字样 → 删除所有空格（含全角空格）与标点符号（全角括号、英文括号、方括号、斜杠、反斜杠、连字符、下划线、顿号、逗号、句点、冒号、分号、加号、星号、引号等）。得到 norm(company)+'|'+norm(position) 即岗位键。
 3.3 逐条判定（对猎聘 + 领英的每一个采集结果）：
   a) 岗位键命中存量集合 或 命中本轮已入库集合 → 判定为重复，直接跳过，不写入、不改状态、不打分，重复计数 M+1。即使链接不同、平台不同、薪资不同也必须跳过。
@@ -62,9 +93,10 @@ SELECT company, position, count(*) AS cnt FROM jobs WHERE owner_id='<owner_id>' 
 【第3.5步：JEV 自动打分】仅对本轮新入库且 status='待确认' 的岗位逐条打分：
 - 方法论：核心技能与岗位要求匹配 35%；行业/业务领域 15%；职级与经验年限 20%；薪资与地点可行性 15%；与目标岗位方向的发展契合度 15%。只依据画像中真实存在的证据，禁止虚构脑补；证据不足按保守中间分计；硬性冲突（城市/职级/行业完全不符）直接 <50。
 - 依据 position/jd_summary/salary/location 对照画像，给出 0-100 与 match_reason（≤30字：得分主依据+最大缺口）。
+- **关键词加权（2026-11-05，修正"打分过严"）**：岗位标题或 JD 摘要命中 SAP BPC / SAP Project Manager / SAP Senior Consultant / SAP Consultant / BPC Consultant / 全面预算 / 合并报表 / 业财一体化 / 财务数字化 之一，核心技能维度按「强相关」计（不低于 70），总分相应上调；未命中的按原规则评估，**不因未命中而扣分**（命中即加分，不命中不减分）。
 - mode=write：UPDATE jobs SET match_score=<0-100>, match_reason='<原因>', updated_at=now() WHERE id=<job_id>。存量老岗位一律不重新打分。
 
-【第4步：收尾登记+汇总】清理 .workbuddy/tmp/ 临时 JSON，然后 mode=write：两部分都完全失败（0 入库）→ UPDATE agent_tasks SET status='failed', note='失败原因：<≤40字>', processed_at=now() WHERE id='<run_id>'；否则 → UPDATE agent_tasks SET status='done', note='猎聘入库N1条/领英入库N2条/重复M个/清理重复C条/打分K条', processed_at=now() WHERE id='<run_id>'（领英因代理跳过时在 note 末尾注明「失败原因：领英跳过——Edge未走代理」）。补跑（比计划晚 30 分钟以上）在 note 末尾加「（补跑）」。汇总消息包含：运行时间、猎聘新入库 N1、领英新入库 N2（跳过则注明原因）、因已存在而跳过 M 个（注明其中分别有多少是已投递/已拒绝岗位）、自检清理 C 条、已打分 K 条（列出最高分前 3：公司+岗位+分数），附链接 <SHARE_LINK> 并提示去「③ 投递清单 · 最新岗位清单」查看。
+【第4步：收尾登记+汇总】清理 .workbuddy/tmp/ 临时 JSON，然后 mode=write：两部分都完全失败（0 入库）→ UPDATE agent_tasks SET status='failed', note='失败原因：<≤40字>', processed_at=now() WHERE id='<run_id>'；否则 → UPDATE agent_tasks SET status='done', note='猎聘入库N1条/领英入库N2条/重复M个/清理重复C条/打分K条', processed_at=now() WHERE id='<run_id>'（领英跳过时在 note 末尾注明「领英跳过：<脚本给出的原因>」）。补跑（比计划晚 30 分钟以上）在 note 末尾加「（补跑）」。汇总消息包含：运行时间、猎聘新入库 N1、领英新入库 N2（跳过则注明原因）、因已存在而跳过 M 个（注明其中分别有多少是已投递/已拒绝岗位）、自检清理 C 条、已打分 K 条（列出最高分前 3：公司+岗位+分数），附链接 <SHARE_LINK> 并提示去「③ 投递清单 · 最新岗位清单」查看。
 【注意】猎聘 goto 连续失败或遇验证码/异常页，该部分说明后结束（重试不超过 2 次），继续领英。不访问职位详情页，不做登录、点击投递等操作。
 ```
 
@@ -94,22 +126,19 @@ UPDATE agent_tasks SET status='failed', note='失败原因：运行超时无响�
 【第2步：读取画像】用 mode=read 执行：SELECT id, owner_id, owner_name, keywords, keywords_en, competitiveness, target_profile FROM profiles WHERE owner_id='<owner_id>' AND is_active=true AND confirmed=true ORDER BY created_at DESC LIMIT 1。
 - 若无结果：UPDATE agent_tasks SET status='failed', note='失败原因：画像未确认，请先在应用①完成简历分析并确认画像', processed_at=now() WHERE id='<task_id>'，然后给用户发一条消息「手动采集未能执行：请先在应用①完成简历分析并确认画像」，附链接 <SHARE_LINK> ，结束。
 
-【第3步：猎聘无头采集】取最多 3 个中文关键词（keywords）构造 URL：https://www.liepin.com/zhaopin/?key=<URL编码后的关键词>。对每个关键词依次执行（不同搜索之间 sleep 30-60 秒随机间隔）：
+【第3步：猎聘无头采集】**关键词按游标轮换**：读 profiles.keywords（中文）全量得词池；读游标 `.workbuddy/tmp/liepin-kw-cursor.txt`（无则 0），从游标起循环取 3 个，用完写回 `(游标+3) % 池长`。每个关键词取 2 页：`https://www.liepin.com/zhaopin/?key=<URL编码后的关键词>&currentPage=<1|2>`（第 2 页与第 1 页完全重复则只算 1 页并注明）。对每个关键词依次执行（不同搜索之间 sleep 30-60 秒随机间隔）：
 用命令 /c/Users/<USER>/.workbuddy/skills/gstack/browse/dist/browse.exe：
 1. goto 该 URL（若输出含 Server failed 则再执行一次 goto 重试）
 2. sleep 5
 3. 执行 js 提取（单行 JSON.stringify）：遍历 document.querySelectorAll('a[data-nick=job-detail-job-info]')，每条取：title = 第一个 div[title] 的 title 属性；link = a.href 去掉 ? 后参数；salary = a 内 span 文本中匹配 /^\d/ 且含 k 或 万 的第一个；location = a.textContent 匹配 /【([^】]+)】/ 的第一段（如「苏州-常熟」，旧版按「区/县/市」结尾匹配会漏掉「xx-xx」格式）；tags = 匹配含「年以下|年以上|本科|硕士|大专|博士」的 span 文本拼接；company = a.closest('div.jobDetailBox')（注意：2026-10 实测卡片没有 li 容器，closest('li') 返回 null）内 [class*=companyNam] 元素的文本。实测避坑：browse 守护进程崩溃后会在 <WORKSPACE>/.gstack/terminal-agent-pid.lock 留下 0 字节残留锁，导致后续所有启动报「Server failed to start」——重试前先删除该锁文件；若环境变量含失效的 HTTP(S)_PROXY，browse 启动时也会失败，需先 unset。
 4. 把 JSON 写入 .workbuddy/tmp/liepin-<关键词slug>.json。若猎聘整体失败（goto 连续异常/验证码），记下失败原因，继续第4步。
 
-【第4步：领英采集（优先公开接口，失败才回退 Edge）】**首选（2026-10-29 实测）：领英 jobs-guest 公开接口**，browse.exe 直接打开即可，不依赖登录态、无需滚动、每页 10 条完整字段：
-- URL：https://www.linkedin.com/jobs-guest/jobs/api/seeMoreJobPostings/search?keywords=<URL编码关键词>&location=<URL编码地点>&f_TPR=r604800&start=<偏移量>
-- 用 browse.exe chain 一次完成「goto → wait li → eval scripts/extract-linkedin.js」，start 取 0/10/20 三页（30 条/关键词），页间 sleep 6-15 秒随机；
-- 某页返回空或 429 → 该关键词停止翻页换下一个；连续两词 429 → 领英整体放弃（绝不重试）。
-- 关键词选择：读 keywords_en 全量，去掉括号注释（取括号前部分）得有效词池；读游标 .workbuddy/tmp/linkedin-kw-cursor.txt（无则 0），从游标起循环取 3 个，用完写回 (游标+3)%池长（轮换，避免每轮只用同 3 个词）。地点：取 target_profile.cities_en 第一个，不含「China」则追加「, China」（%2C%20China）；缺省 Shanghai%2C%20China。
-**回退（接口不可用时）**：mcp__browser__browsers_list 取 Edge 扩展浏览器（没有则跳过，记「领英未采集：Edge 未连接」），tabs_new 打开 https://www.linkedin.com/jobs/search/?keywords=<编码关键词>&location=<地点>&f_TPR=r604800 ，等 6 秒。若 tab_url 被重定向到 linkedin.cn、或出现 451/登录页/验证码/认证墙 → 放弃并记「Edge 未走全局代理」；429 → 立即放弃。滚动：**列表在内层窗格**，先用 cua_execute 把鼠标 move 到列表区域（x≈屏宽×0.34，y=500）再 scroll（scroll_y=1500），超时则等 5 秒读一次 DOM 继续；共 5 屏，每屏等 4-6 秒（骨架屏）再 dom_cua_get_visible_dom，按 link 去重累积（上限 40 条）；某屏无新增 link 时把 y 改 400 重试一次。
-     d. 不点分页/加载更多按钮，只做自然向下滚动，不点击任何职位卡；
-  4. 写入 .workbuddy/tmp/linkedin-<关键词slug>.json（platform='领英'）。
-每个关键词之间 sleep 30-60 秒（走公开接口时页间隔 6-15 秒即可，词间隔仍保持）。全程只读，绝不点击职位卡、绝不点击 Easy Apply。
+【第4步：领英采集（直连 jobs-guest 接口，2026-11-06 重构）】用 `python job-apply-agent/scripts/collect-linkedin-guest.py --keywords "<4 个词>" --pages 5 --out .workbuddy/tmp` 一次跑完 4 词 × 5 页（约 200 条，2-3 分钟）。
+- 门禁以脚本输出为准：`GATE PASS` 才继续；`GATE FAIL` / `SKIP linkedin: <原因>`（退出码 2）→ 跳过领英，note 记「领英跳过：<原因>」，不重试、不改走直连。
+- 关键词：读 keywords_en，从游标 `.workbuddy/tmp/linkedin-kw-cursor.txt` 起取 4 个循环，写完回写 (游标+4)%池长。泛词（无 SAP/BPC/AI/LLM/Digital 限定）自动拼「SAP + 原词」。
+- 脚本产出 .workbuddy/tmp/li-page-<slug>-<start>.json，字段已对齐 title/company/location/link，直接进入第 5 步查重。
+- 仅在接口 200 可用但解析出 0 条（疑似页面改版）时，才回退 Edge 浏览器路径：mcp__browser__browsers_list 取 Edge → tabs_new 打开 https://www.linkedin.com/jobs/search/?keywords=<编码关键词>&location=<地点>&f_TPR=r604800 → 等 6 秒 → 列表内层窗格滚动 5 屏（每屏 4-6 秒）→ dom_cua_get_visible_dom 按 link 去重累积（上限 40 条）。重定向 linkedin.cn / 429 / 451 立即放弃。
+直连接口路径的节流已内置在脚本里（页间隔 3 秒、词间隔 4 秒），不需要额外 sleep；只有回退到 Edge 浏览器路径时才需要词间 30-60 秒。全程只读，绝不点击职位卡、绝不点击 Easy Apply。
 【地点收窄】写库前只保留上海/远程/全国（location 含「上海 / Shanghai / 远程 / Remote / 全国」之一）；外地岗位一律跳过并在汇总里报数。2026-10-29 实测猎聘单轮 111 条去重后仅 24 条在上海，不加这层过滤会持续稀释清单。
 
 【第5步：写入岗位池——全状态查重（本步是最关键约束，必须严格执行）】
@@ -131,8 +160,8 @@ SELECT company, position, count(*) AS cnt FROM jobs WHERE owner_id='<owner_id>' 
 - 得出 0-100 总分和 match_reason（≤30字：主依据+最大缺口），用 mode=write 逐条 UPDATE jobs SET match_score=<分>, match_reason='<原因>', updated_at=now() WHERE id=<job_id>。存量老岗位不重新打分。
 
 【第7步：收尾登记+通知】清理 .workbuddy/tmp/ 下本轮临时 JSON，然后登记结果（mode=write，逐条执行）：
-- 若猎聘与领英两部分均未成功（全部失败/跳过且 0 入库）：UPDATE agent_tasks SET status='failed', note='失败原因：<一句话，≤40字>', processed_at=now() WHERE id='<task_id>'，并给用户发失败说明（若涉及领英，提醒用户开启全局代理后重新点「⚡ 通知 Agent 立即采集」）。
-- 否则：UPDATE agent_tasks SET status='done', note='猎聘入库N1条/领英入库N2条/重复M个/清理重复C条/打分K条'（领英跳过时末尾注明「失败原因：领英跳过——Edge未走代理」）, processed_at=now() WHERE id='<task_id>'。
+- 若猎聘与领英两部分均未成功（全部失败/跳过且 0 入库）：UPDATE agent_tasks SET status='failed', note='失败原因：<一句话，≤40字>', processed_at=now() WHERE id='<task_id>'，并给用户发失败说明（若涉及领英，把脚本给出的失败原因原样告诉用户）。
+- 否则：UPDATE agent_tasks SET status='done', note='猎聘入库N1条/领英入库N2条/重复M个/清理重复C条/打分K条'（领英跳过时末尾注明「领英跳过：<脚本给出的原因>」）, processed_at=now() WHERE id='<task_id>'。
 最后给用户发简短汇总：执行时间、猎聘 N1 条/领英 N2 条入库（跳过注明原因）、因已存在跳过 M 个（注明其中分别有多少是已投递/已拒绝岗位）、自检清理 C 条、已打分 K 条（附最高分前3：公司+岗位+分数），附链接 <SHARE_LINK> 并提示到「③ 投递清单 → 最新岗位清单」查看倒排结果。
 
 【注意】不要访问职位详情页；不要登录、点击投递或修改任何设置；猎聘连续失败或遇验证码时该部分记下原因后放弃（重试不超过 2 次），继续领英部分。

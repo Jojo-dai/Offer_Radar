@@ -1,14 +1,17 @@
 {
   "_comment": "复制为 config.json 后按需修改。前端不读这个文件（前端靠 SDK 自动识别所属应用），它只是给你自己做任务 prompt 替换时的对照表。firstRun 三问由「首次运行引导」填写（见 README / docs/assets/first-run.svg）。",
-  "_firstRun_comment": "identityMode: workbuddy=OAuth 账号通道 | selfhosted=自建 PG/Supabase（须先执行 scripts/auth-isolation.sql 并通过越权自检）。resumeStorage: db=脱敏文本≤20000字落 profiles.resume_text | profile_only=不落原文，写入一律不含 resume_text 字段。networkGate.result 由 bash scripts/check-network.sh 的实际结果填写，禁止凭用户自述通过。",
+  "_firstRun_comment": "identityMode: workbuddy=OAuth 账号通道 | selfhosted=自建 PG/Supabase（须先执行 scripts/auth-isolation.sql 并通过越权自检）。resumeStorage: db=脱敏文本≤20000字落 profiles.resume_text | profile_only=不落原文，写入一律不含 resume_text 字段。networkGate.result 由 bash scripts/check-network.sh 的实际结果填写，禁止凭用户自述通过。networkGate 判据自 2026-11-06 起改为「接口实测」：只要 jobs-guest 返回 ≥1 条岗位卡片即放行，出口 IP 仅作提示，不再参与门禁（旧版看 loc≠CN，代理抖动时会整天误跳过领英）。",
 
   "firstRun": {
     "identityMode": "workbuddy | selfhosted",
     "resumeStorage": "db | profile_only",
     "networkGate": {
       "checked": false,
-      "assertLocNotCN": null,
-      "assertStatus200": null,
+      "probeEndpoint": "linkedin jobs-guest (see collect.linkedin.searchUrl)",
+      "assertCardsGt": 0,
+      "assertNoRedirectToCN": true,
+      "lastHttpStatus": null,
+      "lastCardCount": null,
       "result": "pending | dual_source | liepin_only",
       "userInformedSingleSource": false
     }
@@ -21,26 +24,46 @@
   "browseExe": "/c/Users/<you>/.workbuddy/skills/gstack/browse/dist/browse.exe",
 
   "collect": {
-    "keywordsCount": 3,
+    "keywordsMode": "rotate",
+    "keywordsCursor": ".workbuddy/tmp/kw-cursor.txt",
     "liepin": {
-      "searchUrl": "https://www.liepin.com/zhaopin/?key=<kw>",
+      "keywordsPerRun": 3,
+      "pagesPerKeyword": 2,
+      "searchUrl": "https://www.liepin.com/zhaopin/?key=<kw>&currentPage=<page>",
       "cardSelector": "a[data-nick=job-detail-job-info]",
-      "perKeywordLimit": 40,
-      "betweenKeywordsSeconds": [30, 60]
+      "perKeywordLimit": 45,
+      "betweenKeywordsSeconds": [30, 60],
+      "requiresProxy": false
     },
     "linkedin": {
-      "searchUrl": "https://www.linkedin.com/jobs/search/?keywords=<kw>&location=<loc>",
+      "_comment": "2026-11-06 重构：门禁判据从「出口 IP 非 CN」改为「接口返回卡片数>0」；采集改为脚本直连 jobs-guest，不再依赖 Edge 登录态。",
+      "collector": "scripts/collect-linkedin-guest.py",
+      "searchUrl": "https://www.linkedin.com/jobs-guest/jobs/api/seeMoreJobPostings/search?keywords=<kw>&location=<loc>&f_TPR=r604800&start=<offset>",
       "defaultLocation": "Shanghai, China",
-      "perKeywordLimit": 25,
-      "betweenKeywordsSeconds": [30, 60],
-      "requiresBrowser": "Microsoft Edge (extension channel, must be logged in)",
+      "keywordsPerRun": 4,
+      "pagesPerKeyword": 5,
+      "pageSize": 10,
+      "perKeywordLimit": 50,
+      "betweenPagesSeconds": 3,
+      "betweenKeywordsSeconds": 4,
+      "requiresBrowser": false,
+      "requiresAuth": false,
+      "genericKeywordGuard": {
+        "_comment": "裸泛词（Project Manager / Consultant / Product Manager 等，且不带 SAP/BPC/AI/LLM/Digital 限定）自动补 SAP 前缀再搜",
+        "enabled": true,
+        "prefix": "SAP ",
+        "words": ["Project Manager", "Consultant", "Senior Consultant", "Product Manager", "Solution Architect"]
+      },
       "networkGate": {
-        "assertLocNotCN": true,
-        "assertStatus200": true,
-        "skipInsteadOfDirectFallback": true
+        "_comment": "只看接口实测，不看出口 IP。IP 仅打印提示。",
+        "probeKeywords": 2,
+        "assertCardsGt": 0,
+        "skipOn": ["302->linkedin.cn", "429", "451", "0 cards"],
+        "neverFetchLinkedinCN": true,
+        "exitCodeOnGateFail": 2
       }
     },
-    "maxInsertPerRun": 120
+    "maxInsertPerRun": 200
   },
 
   "dedupe": {
@@ -62,7 +85,16 @@
     "temperature": 0.3,
     "batchSize": 20,
     "reasonMaxChars": 30,
-    "hardConflictBelow": 50
+    "hardConflictBelow": 50,
+    "keywordBoost": {
+      "_comment": "2026-11-05 修正「打分过严」：命中即加分，未命中不扣分。",
+      "strongMatchKeywords": [
+        "SAP BPC", "SAP Project Manager", "SAP Senior Consultant", "SAP Consultant",
+        "BPC Consultant", "SAP S/4HANA", "全面预算", "合并报表", "业财一体化", "财务数字化"
+      ],
+      "skillFloorWhenHit": 70,
+      "penaltyWhenMiss": 0
+    }
   },
 
   "schedule": {
