@@ -120,10 +120,25 @@ def main():
         got = 0
         for page in range(args.pages):
             start = page * 10
-            try:
-                h, _ = fetch(kw, args.location, start)
-            except Exception as e:
-                print("  ERR kw=%s start=%d %s" % (kw, start, str(e)[:60]))
+            # 429 自适应：先冷却 45-75 秒重试一次，仍 429 才放弃该词
+            for attempt in (1, 2):
+                try:
+                    h, _ = fetch(kw, args.location, start)
+                    break
+                except urllib.error.HTTPError as e:
+                    if e.code == 429 and attempt == 1:
+                        cool = 45 + (os.getpid() % 30)
+                        print("  THROTTLE kw=%s start=%d 429，冷却 %ds 后重试" % (kw, start, cool))
+                        time.sleep(cool)
+                        continue
+                    print("  ERR kw=%s start=%d %s" % (kw, start, str(e)[:60]))
+                    h = None
+                    break
+                except Exception as e:
+                    print("  ERR kw=%s start=%d %s" % (kw, start, str(e)[:60]))
+                    h = None
+                    break
+            if not h:
                 break
             items = parse(h)
             path = os.path.join(args.out, "li-page-%s-%d.json" % (slug, start))
@@ -132,10 +147,10 @@ def main():
             got += len(items)
             if len(items) < 10:
                 break
-            time.sleep(3)
+            time.sleep(3 + (os.getpid() + page) % 3)   # 3-5 秒抖动，降低被限流概率
         total += got
         print("KW=%s total=%d" % (kw, got))
-        time.sleep(4)
+        time.sleep(4 + (os.getpid() % 3))
 
     print("ALL DONE total=%d keywords=%d pages=%d" % (total, len(kws), args.pages))
     return 0 if total else 2

@@ -67,7 +67,8 @@
 【第2步：领英采集（直连 jobs-guest 公开接口，2026-11-06 重构）】**唯一主路径**：用脚本 `job-apply-agent/scripts/collect-linkedin-guest.py` 直连领英访客接口，不开浏览器、不依赖登录态。实测 200 条约 2 分 40 秒（旧 browse.exe 通道 90 条约 5 分半）。
 - 门禁**不再看出口 IP**：脚本内置探针，先请求一次接口，返回 ≥1 条卡片即放行；302→linkedin.cn / 429 / 451 / 0 条才跳过。跑之前也可单独执行 `bash job-apply-agent/scripts/check-network.sh` 自检（同样是接口实测口径）。
 - 调用：`python job-apply-agent/scripts/collect-linkedin-guest.py --keywords "<词1>,<词2>,<词3>,<词4>" --pages 5 --out .workbuddy/tmp`，退出码 2 = 接口不可用，此时跳过领英并在 note 写明原因，不要重试、不要改走直连。
-- 每关键词 **5 页**（start=0/10/20/30/40，每页 10 条，实测第 5 页仍有结果）；某页不足 10 条自动停该词的翻页；页间隔 3 秒、词间隔 4 秒，脚本已内置。
+- 每关键词 **5 页**（start=0/10/20/30/40，每页 10 条，实测第 5 页仍有结果）；某页不足 10 条自动停该词的翻页；页间隔 3-5 秒抖动、词间隔 4-6 秒，脚本已内置。
+- **429 自适应**：某页返回 429 时脚本先冷却 45-75 秒再重试一次，仍 429 才放弃该关键词（继续跑后面的词）。实测一轮 20 页约在第 16-17 页开始被限流，冷却重试能把剩余页捞回来；不要让 Agent 在 429 后手工狂重试。
 - **每轮取 4 个关键词**（旧口径 3 个）：单轮上限 200 条，是旧口径（3×3×10=90）的 2.2 倍。
 关键词选择：读 keywords_en 全量，去掉括号注释（取括号前部分）得有效词池（当前 15 个：SAP BPC / SAP Project Manager / SAP Senior Consultant / SAP Consultant / SAP S/4HANA Finance / BPC Consultant / Comprehensive Budget Management / Business Planning and Consolidation / AI Product Manager / Enterprise AI Solutions / Digital Transformation / Large Language Model(LLM) / RAG / Multi-Agent Systems / FP&A Manager）；读游标 `.workbuddy/tmp/linkedin-kw-cursor.txt`（无则 0），从游标起循环取 4 个，用完写回 (游标+4) % 池长——15 词约 4 轮（2 天）全部轮到一次。
 **泛词护栏**：取到的词若不含 SAP / BPC / AI / LLM / Digital 等限定前缀且属于 Project Manager、Consultant、Product Manager 这类泛词，自动拼成「SAP + 原词」再搜；带限定词的保持原样。地点取 target_profile.cities_en 第一个，不含「China」则追加「, China」，缺省 Shanghai, China（脚本 --location 参数）。
