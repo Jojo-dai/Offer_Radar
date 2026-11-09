@@ -614,6 +614,20 @@ function normTxt(s){
     .toLowerCase();
 }
 function dupKey(j){ return normTxt(j.company) + '|' + normTxt(j.position); }
+/* 全量取 jobs：按 id 键集分页（每页 900），池子再大也不会被 limit 截断。
+   与后端 dump-existing.py 同一套思路——云库单次查询有行数上限，靠分页绕开。 */
+async function fetchAllJobs(cols = '*'){
+  const all = []; let last = 0;
+  for(;;){
+    const { data, error } = await cloud.database.from('jobs').select(cols).gt('id', last).order('id').limit(900);
+    if (error) throw error;
+    if (!data || !data.length) break;
+    all.push(...data);
+    if (data.length < 900) break;
+    last = data[data.length-1].id;
+  }
+  return all;
+}
 function bestFirst(a,b){
   const ra = STATUS_RANK[a.status] ?? 9, rb = STATUS_RANK[b.status] ?? 9;
   if (ra !== rb) return ra - rb;
@@ -657,7 +671,7 @@ $('#smartImportBtn').onclick = async () => {
     if (arr && arr.length && arr.some(x => x && (x.company || x.title || x.position))){
       hint('#poolHint','识别为书签 JSON，正在批量导入去重…', true);
       arr = arr.slice(0, 60);
-      const { data: exist } = await cloud.database.from('jobs').select('company,position,source_url,platform').limit(500);
+      const { data: exist } = await cloud.database.from('jobs').select('company,position,source_url,platform').gt('id', 0).order('id').limit(2000);
       const key = j => dupKey(j);
       const urlKey = u => String(u||'').trim().replace(/[?#].*$/,'').toLowerCase();
       const seen = new Set((exist||[]).map(key));
@@ -694,7 +708,7 @@ $('#smartImportBtn').onclick = async () => {
       hint('#poolHint','识别为 JD 文本，AI 正在解析…', true);
       const chunks = raw.split(/\n\s*---\s*\n/).map(s=>s.trim()).filter(s=>s.length>20).slice(0,10);
       const url = $('#jobUrl').value.trim() || null;
-      const { data: exist2 } = await cloud.database.from('jobs').select('company,position,source_url').limit(500);
+      const { data: exist2 } = await cloud.database.from('jobs').select('company,position,source_url').gt('id', 0).order('id').limit(2000);
       const seen2 = new Set((exist2||[]).map(j=>dupKey(j)));
       const urlKey2 = u => String(u||'').trim().replace(/[?#].*$/,'').toLowerCase();
       const seenUrl2 = new Set((exist2||[]).map(j=>urlKey2(j.source_url)).filter(Boolean));
@@ -732,7 +746,7 @@ $('#dedupeBtn').onclick = async () => {
   try{
     requireSession();
     $('#dedupeBtn').disabled = true; hint('#poolHint','正在扫描重复岗位…', true);
-    const { data } = await cloud.database.from('jobs').select('*').limit(1000);
+    const data = await fetchAllJobs();
     const map = new Map();
     (data||[]).forEach(j => { const k = dupKey(j); if (!map.has(k)) map.set(k, []); map.get(k).push(j); });
     const groups = [...map.values()].filter(g => g.length > 1);
@@ -764,7 +778,7 @@ $('#matchBtn').onclick = async () => {
     requireSession();
     const { data: profs } = await cloud.database.from('profiles').select('*').eq('is_active', true).eq('confirmed', true).limit(1);
     if (!profs?.length) return toast('请先在「① 简历画像」多轮调整并点击「确认画像」后，再来打分');
-    const { data: pendRaw } = await cloud.database.from('jobs').select('*').eq('status','待确认').limit(200);
+    const { data: pendRaw } = await cloud.database.from('jobs').select('*').eq('status','待确认').order('created_at',{ascending:false}).limit(200);
     if (!pendRaw?.length) return toast('岗位池中没有待确认的岗位');
     const pend = dedupeList(pendRaw).list.slice(0,20); // 打分前先折叠重复，避免同一岗位重复消耗 tokens
     $('#matchBtn').disabled = true; hint('#poolHint','AI 正在按画像匹配打分…', true);
@@ -835,7 +849,8 @@ $('#triggerCollectBtn').onclick = async () => {
 async function loadPool(){
   try{
     requireSession();
-    const { data } = await cloud.database.from('jobs').select('*').order('created_at',{ascending:false}).limit(1000);
+    // 全量分页取，防止池子超 1000 后旧岗位整段不可见
+    const data = await fetchAllJobs();
     const rawPool = (data||[]).filter(j => j.status === '待确认');
     const { list: pool, hidden } = dedupeList(rawPool);
     const sortedPool = sortFreshFirst(pool);
@@ -867,8 +882,8 @@ async function loadConfirm(){
     requireSession();
     // 2026-11-05 修正：原实现先按 match_score 全库取前 200 再按状态过滤，
     // 待确认超过 200 条后新采的低分岗位永远进不了榜（当天 80 条新增只有 18 条可见）。
-    // 现改为：取最近入库的 1000 条 → 按状态分组 → 组内 48h 新增置顶，再按匹配度排。
-    const { data } = await cloud.database.from('jobs').select('*').order('created_at',{ascending:false}).limit(1000);
+    // 现改为：全量分页取 → 按状态分组 → 组内 48h 新增置顶，再按匹配度排。
+    const data = await fetchAllJobs();
     const all = data||[];
     const pending = sortFreshFirst(dedupeList(all.filter(j=>j.status==='待确认')).list);
     const ready = sortFreshFirst(dedupeList(all.filter(j=>j.status==='待投递')).list);
@@ -1018,7 +1033,7 @@ $('#refreshNowBtn').onclick = () => { loadDashboard(); scheduleNext(); toast('�
 async function loadDashboard(){
   try{
     requireSession();
-    const { data: jobs } = await cloud.database.from('jobs').select('*').order('updated_at',{ascending:false}).limit(500);
+    const jobs = await fetchAllJobs('id,company,position,location,status,platform,updated_at');
     const { data: events } = await cloud.database.from('job_events').select('*').order('created_at',{ascending:false}).limit(30);
     const all = jobs||[];
     const cnt = {}; STATUSES.forEach(s=>cnt[s]=0); all.forEach(j=>{ cnt[j.status]=(cnt[j.status]||0)+1; });
