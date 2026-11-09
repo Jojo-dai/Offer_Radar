@@ -86,6 +86,7 @@
 - 每关键词 **5 页**（start=0/10/20/30/40，每页 10 条，实测第 5 页仍有结果）；某页不足 10 条自动停该词的翻页；页间隔 3-5 秒抖动、词间隔 4-6 秒，脚本已内置。
 - **429 自适应**：某页返回 429 时脚本先冷却 45-75 秒再重试一次，仍 429 才放弃该关键词（继续跑后面的词）。实测一轮 20 页约在第 16-17 页开始被限流，冷却重试能把剩余页捞回来；不要让 Agent 在 429 后手工狂重试。
 - **每轮取 4 个关键词**（旧口径 3 个）：单轮上限 200 条，是旧口径（3×3×10=90）的 2.2 倍。
+- **失败词自动补采（2026-11-10 新增，防 429 丢词）**：脚本会把"被限流中断"的词写入 `.workbuddy/tmp/linkedin-retry-queue.json`，下轮运行自动补采冷却满 30 分钟的失败词（每轮最多补 1 个，总词数 ≤5）；门禁整体跳过时本轮词也全部入队，接口恢复后自动补采。看到 `RETRY-PICK`（补采上轮失败词）或 `RETRY-ENQUEUE`（本轮失败词已入队）属正常，无需人工处理；失败词被顺延时输出 `RETRY-DEFER`。
 关键词选择：读 keywords_en 全量，去掉括号注释（取括号前部分）得有效词池（当前 15 个：SAP BPC / SAP Project Manager / SAP Senior Consultant / SAP Consultant / SAP S/4HANA Finance / BPC Consultant / Comprehensive Budget Management / Business Planning and Consolidation / AI Product Manager / Enterprise AI Solutions / Digital Transformation / Large Language Model(LLM) / RAG / Multi-Agent Systems / FP&A Manager）；读游标 `.workbuddy/tmp/linkedin-kw-cursor.txt`（无则 0），从游标起循环取 4 个，用完写回 (游标+4) % 池长——15 词约 4 轮（2 天）全部轮到一次。
 **泛词护栏**：取到的词若不含 SAP / BPC / AI / LLM / Digital 等限定前缀且属于 Project Manager、Consultant、Product Manager 这类泛词，自动拼成「SAP + 原词」再搜；带限定词的保持原样。地点取 target_profile.cities_en 第一个，不含「China」则追加「, China」，缺省 Shanghai, China（脚本 --location 参数）。
 **回退方式（仅当脚本因解析结构变化返回 0 条、且接口本身 200 可用时）**：mcp__browser__browsers_list 取 Edge 扩展浏览器，tabs_new 打开 https://www.linkedin.com/jobs/search/?keywords=<编码关键词>&location=<地点>&f_TPR=r604800，等 6 秒；页面若重定向到 linkedin.cn 或出现 451/登录页/验证码则放弃；429 立即放弃。滚动：把鼠标 move 到列表区域（x≈屏宽×0.34，y=500）再 scroll，滚 5 屏、每屏等 4-6 秒再 dom_cua_get_visible_dom、按 link 去重累积（上限 40 条）。此路径只做兜底，不要每轮都走。
@@ -126,7 +127,7 @@ SELECT company, position, count(*) AS cnt FROM jobs WHERE owner_id='<owner_id>' 
 - **关键词加权（2026-11-05，修正"打分过严"）**：岗位标题或 JD 摘要命中 SAP BPC / SAP Project Manager / SAP Senior Consultant / SAP Consultant / BPC Consultant / 全面预算 / 合并报表 / 业财一体化 / 财务数字化 之一，核心技能维度按「强相关」计（不低于 70），总分相应上调；未命中的按原规则评估，**不因未命中而扣分**（命中即加分，不命中不减分）。
 - mode=write：UPDATE jobs SET match_score=<0-100>, match_reason='<原因>', updated_at=now() WHERE id=<job_id>。存量老岗位一律不重新打分。
 
-【第4步：收尾登记+汇总】清理 .workbuddy/tmp/ 临时 JSON，然后 mode=write：两部分都完全失败（0 入库）→ UPDATE agent_tasks SET status='failed', note='失败原因：<≤40字>', processed_at=now() WHERE id='<run_id>'；否则 → UPDATE agent_tasks SET status='done', note='猎聘入库N1条/领英入库N2条/重复M个/清理重复C条/打分K条', processed_at=now() WHERE id='<run_id>'（领英跳过时在 note 末尾注明「领英跳过：<脚本给出的原因>」）。补跑（比计划晚 30 分钟以上）在 note 末尾加「（补跑）」。汇总消息包含：运行时间、猎聘新入库 N1、领英新入库 N2（跳过则注明原因）、因已存在而跳过 M 个（注明其中分别有多少是已投递/已拒绝岗位）、自检清理 C 条、已打分 K 条（列出最高分前 3：公司+岗位+分数），附链接 <SHARE_LINK> 并提示去「③ 投递清单 · 最新岗位清单」查看。
+【第4步：收尾登记+汇总】收尾前先做**轮末自检**（docs/11-guardrails.md 第二节，逐条核对）：① 本轮入库>0 或重复数有值；② 领英未静默跳过；③ 两个关键词游标文件已推进；④ 打分完成或注明原因。任何一项不过，在 note 里写明，不许静默略过。然后清理 .workbuddy/tmp/ 临时 JSON，然后 mode=write：两部分都完全失败（0 入库）→ UPDATE agent_tasks SET status='failed', note='失败原因：<≤40字>', processed_at=now() WHERE id='<run_id>'；否则 → UPDATE agent_tasks SET status='done', note='猎聘入库N1条/领英入库N2条/重复M个/清理重复C条/打分K条', processed_at=now() WHERE id='<run_id>'（领英跳过时在 note 末尾注明「领英跳过：<脚本给出的原因>」）。补跑（比计划晚 30 分钟以上）在 note 末尾加「（补跑）」。汇总消息包含：运行时间、猎聘新入库 N1、领英新入库 N2（跳过则注明原因）、因已存在而跳过 M 个（注明其中分别有多少是已投递/已拒绝岗位）、自检清理 C 条、已打分 K 条（列出最高分前 3：公司+岗位+分数），附链接 <SHARE_LINK> 并提示去「③ 投递清单 · 最新岗位清单」查看。
 【注意】猎聘 goto 连续失败或遇验证码/异常页，该部分说明后结束（重试不超过 2 次），继续领英。不访问职位详情页，不做登录、点击投递等操作。
 ```
 
@@ -168,7 +169,7 @@ UPDATE agent_tasks SET status='failed', note='失败原因：运行超时无响�
 - 关键词：读 keywords_en，从游标 `.workbuddy/tmp/linkedin-kw-cursor.txt` 起取 4 个循环，写完回写 (游标+4)%池长。泛词（无 SAP/BPC/AI/LLM/Digital 限定）自动拼「SAP + 原词」。
 - 脚本产出 .workbuddy/tmp/li-page-<slug>-<start>.json，字段已对齐 title/company/location/link，直接进入第 5 步查重。
 - 仅在接口 200 可用但解析出 0 条（疑似页面改版）时，才回退 Edge 浏览器路径：mcp__browser__browsers_list 取 Edge → tabs_new 打开 https://www.linkedin.com/jobs/search/?keywords=<编码关键词>&location=<地点>&f_TPR=r604800 → 等 6 秒 → 列表内层窗格滚动 5 屏（每屏 4-6 秒）→ dom_cua_get_visible_dom 按 link 去重累积（上限 40 条）。重定向 linkedin.cn / 429 / 451 立即放弃。
-直连接口路径的节流已内置在脚本里（页间隔 3 秒、词间隔 4 秒），不需要额外 sleep；只有回退到 Edge 浏览器路径时才需要词间 30-60 秒。全程只读，绝不点击职位卡、绝不点击 Easy Apply。
+直连接口路径的节流已内置在脚本里（页间隔 3 秒、词间隔 4 秒），不需要额外 sleep；只有回退到 Edge 浏览器路径时才需要词间 30-60 秒。全程只读，绝不点击职位卡、绝不点击 Easy Apply。**失败词重采队列已内置在脚本里**（RETRY-PICK / RETRY-ENQUEUE / RETRY-DEFER 输出属正常现象，详见任务 2 第 4 步说明），不需要也不允许手工管理队列文件。
 【地点收窄】写库前只保留上海/远程/全国（location 含「上海 / Shanghai / 远程 / Remote / 全国」之一）；外地岗位一律跳过并在汇总里报数。2026-10-29 实测猎聘单轮 111 条去重后仅 24 条在上海，不加这层过滤会持续稀释清单。
 
 【第5步：写入岗位池——全状态查重（本步是最关键约束，必须严格执行）】

@@ -11,6 +11,11 @@
      单轮 4 词 ≈ 200 条，是旧口径（3 词 × 3 页 = 90 条）的 2.2 倍。
   3. 直连 HTTP + 正则解析，200 条约 2-3 分钟（旧 browse.exe 通道 90 条约 5 分钟）。
 
+2026-11-10 失败词重采队列（防再犯：429 按"整词"丢，每轮最多丢 50 条）：
+  4. 某词整轮 0 条（429/网络错误）→ 写入重采队列 <out>/linkedin-retry-queue.json，
+     下轮运行自动补采冷却满 30 分钟的失败词（每轮最多补 1 个，总词数 ≤ --max-kws）。
+  5. 门禁整体跳过（接口当天不可用）→ 本轮传入词全部入队，恢复后自动补采，不再丢词。
+
 用法：
   python collect-linkedin-guest.py --keywords "SAP BPC,SAP Consultant" [--pages 5] [--out DIR]
 退出码：
@@ -91,6 +96,50 @@ def probe(keyword, loc):
     return True, "探针词返回 %d 条卡片" % n
 
 
+# ---------- 失败词重采队列（2026-11-10）----------
+RETRY_COOLDOWN = 30 * 60          # 失败词冷却 30 分钟后才允许补采
+RETRY_PER_RUN = 1                 # 每轮最多补采 1 个失败词（+1 词 ≈ 50 条 / 40 秒）
+QUEUE_KEEP = 20                   # 队列只留最近 20 条，防止无限膨胀
+
+
+def _queue_path(out):
+    return os.path.join(out, "linkedin-retry-queue.json")
+
+
+def load_queue(out):
+    try:
+        return json.load(open(_queue_path(out), encoding="utf-8"))
+    except Exception:
+        return []
+
+
+def save_queue(out, q):
+    q = q[-QUEUE_KEEP:]
+    json.dump(q, open(_queue_path(out), "w", encoding="utf-8"), ensure_ascii=False, indent=1)
+
+
+def enqueue_failed(out, kws, reason):
+    """把失败词写入队列（去重、刷新时间戳）"""
+    if not kws:
+        return
+    q = [e for e in load_queue(out) if e.get("kw") not in kws]
+    ts = time.time()
+    for kw in kws:
+        q.append({"kw": kw, "ts": ts, "reason": reason})
+    save_queue(out, q)
+
+
+def pick_retry(out, now):
+    """取出冷却达标的失败词（每轮最多 RETRY_PER_RUN 个），并从队列移除"""
+    q = load_queue(out)
+    ready = [e for e in q if now - e.get("ts", 0) >= RETRY_COOLDOWN]
+    if not ready:
+        return []
+    picked = [e["kw"] for e in ready[:RETRY_PER_RUN]]
+    save_queue(out, [e for e in q if e["kw"] not in picked])
+    return picked
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--keywords", required=True, help="逗号分隔的关键词")
@@ -98,10 +147,27 @@ def main():
     ap.add_argument("--out", default=".workbuddy/tmp")
     ap.add_argument("--location", default="Shanghai, China")
     ap.add_argument("--slug-prefix", default="li")
+    ap.add_argument("--max-kws", type=int, default=5,
+                    help="单轮词数上限（传入词全保留，失败词补采最多 RETRY_PER_RUN 个，超出截断）")
+    ap.add_argument("--no-retry-queue", action="store_true",
+                    help="禁用失败词队列（测试/探针用）")
     args = ap.parse_args()
 
-    kws = [k.strip() for k in args.keywords.split(",") if k.strip()]
+    kws_in = [k.strip() for k in args.keywords.split(",") if k.strip()]
     os.makedirs(args.out, exist_ok=True)
+
+    # 合并重采队列：冷却达标的失败词排在最前，优先补采；总词数截到 --max-kws
+    retry_picked = []
+    if not args.no_retry_queue:
+        retry_picked = pick_retry(args.out, time.time())
+        if retry_picked:
+            print("RETRY-PICK %s（上轮失败词，本轮自动补采）" % ",".join(retry_picked))
+    kws = list(dict.fromkeys(retry_picked + kws_in))[:args.max_kws]
+    dropped = [k for k in retry_picked if k not in kws]
+    if dropped:
+        # 没轮到的失败词放回队列，下轮再试
+        enqueue_failed(args.out, dropped, "本轮词数已满，顺延")
+        print("RETRY-DEFER %s（本轮词数已满，已顺延）" % ",".join(dropped))
 
     # 门禁：用前两个词做探针，避免"某个词本就无结果"被误判成接口不可用
     ok, reason = False, "未探测"
@@ -111,16 +177,22 @@ def main():
         if ok:
             break
     if not ok:
-        print("SKIP linkedin: %s" % reason)
+        # 门禁失败 = 本轮一个词都没采到 → 全部入队，接口恢复后自动补采
+        if not args.no_retry_queue:
+            enqueue_failed(args.out, kws, "门禁跳过：%s" % reason)
+        print("SKIP linkedin: %s%s" % (reason, "" if args.no_retry_queue else "（%d 个词已入重采队列）" % len(kws)))
         return 2
 
     total = 0
+    failed_kws = []
     for i, kw in enumerate(kws, 1):
         slug = "%s-%d" % (args.slug_prefix, i)
         got = 0
+        throttled = False   # True = 被 429/网络错误中断（而非正常翻完没结果）
         for page in range(args.pages):
             start = page * 10
             # 429 自适应：先冷却 45-75 秒重试一次，仍 429 才放弃该词
+            h = None
             for attempt in (1, 2):
                 try:
                     h, _ = fetch(kw, args.location, start)
@@ -132,11 +204,11 @@ def main():
                         time.sleep(cool)
                         continue
                     print("  ERR kw=%s start=%d %s" % (kw, start, str(e)[:60]))
-                    h = None
+                    throttled = True
                     break
                 except Exception as e:
                     print("  ERR kw=%s start=%d %s" % (kw, start, str(e)[:60]))
-                    h = None
+                    throttled = True
                     break
             if not h:
                 break
@@ -150,7 +222,14 @@ def main():
             time.sleep(3 + (os.getpid() + page) % 3)   # 3-5 秒抖动，降低被限流概率
         total += got
         print("KW=%s total=%d" % (kw, got))
+        if got == 0 and throttled:
+            failed_kws.append(kw)
         time.sleep(4 + (os.getpid() % 3))
+
+    if failed_kws and not args.no_retry_queue:
+        # 只把"被限流/网络错误中断"的词入队；正常翻完没结果的词不入队（避免死循环补采空词）
+        enqueue_failed(args.out, failed_kws, "整词 0 条（429/网络错误）")
+        print("RETRY-ENQUEUE %s（失败词已入队，下轮自动补采）" % ",".join(failed_kws))
 
     print("ALL DONE total=%d keywords=%d pages=%d" % (total, len(kws), args.pages))
     return 0 if total else 2
