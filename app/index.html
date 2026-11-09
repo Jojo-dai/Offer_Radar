@@ -150,6 +150,8 @@
 
   <!-- 岗位来源状态条：常驻，随「首次运行引导」的选择变化，随时可见 -->
   <div id="sourceBar" class="source-bar" style="display:none"></div>
+  <!-- 数据新鲜度：最近一次入库距今多久，超过 24 小时标红，停更一眼可见 -->
+  <div id="freshBar" class="source-bar" style="display:none"></div>
 
   <main>
 
@@ -310,7 +312,7 @@ const cloud = WorkBuddyCloud.createWorkBuddyCloud({
 const $ = (s) => document.querySelector(s);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const STATUSES = ['待确认','待投递','已投递','已查看','已回复','面试邀请','不合适','已拒绝'];
-let session = null, modelId = null, autoTimer = null, countdownInt = null, nextRefreshAt = 0, curProfileId = null;
+let session = null, modelId = null, autoTimer = null, countdownInt = null, freshTimer = null, nextRefreshAt = 0, curProfileId = null;
 
 function toast(msg, ms = 2600){ const t = $('#toast'); t.textContent = msg; t.classList.add('show'); clearTimeout(t._h); t._h = setTimeout(()=>t.classList.remove('show'), ms); }
 function hint(id, msg, loading){ $(id).innerHTML = (loading ? '<span class="spin"></span>' : '') + esc(msg); }
@@ -340,7 +342,8 @@ function enterApp(sess){
   session = sess;
   $('#loginView').style.display = 'none'; $('#appView').style.display = 'block';
   $('#userName').textContent = session.user?.name ? '👤 ' + session.user.name : '';
-  loadProfileView(); loadPool(); loadConfirm(); startAutoRefresh();
+  loadProfileView(); loadPool(); loadConfirm(); startAutoRefresh(); loadFreshness();
+  clearInterval(freshTimer); freshTimer = setInterval(loadFreshness, 300000);
   switchTab('profile');
   renderSourceBar();
   if(!loadOnb()) openOnboarding();
@@ -1174,6 +1177,27 @@ function finishOnb(){
   renderSourceBar();
   const dual = onbDraft.sourceMode === 'dual';
   toast(dual ? '✅ 已保存：岗位来源 = 猎聘 + 领英' : '✅ 已保存：岗位来源 = 仅猎聘（领英未启用）');
+}
+
+/* 数据新鲜度条：读最近一次入库时间，超过 24 小时标红提示可能停摆（2026-11-09 新增） */
+async function loadFreshness(){
+  const bar = $('#freshBar');
+  if(!bar) return;
+  try{
+    const { data } = await cloud.database.from('jobs').select('*').order('created_at',{ascending:false}).limit(1);
+    const row = data && data[0];
+    const last = row && row.created_at ? new Date(row.created_at).getTime() : 0;
+    if(!last){ bar.style.display = 'none'; return; }
+    const hrs = (Date.now() - last) / 3600000;
+    const txt = hrs < 1 ? '刚更新' : hrs < 48 ? `${Math.round(hrs)} 小时前` : `${(hrs/24).toFixed(1)} 天前`;
+    const stale = hrs > 24;
+    bar.style.display = 'flex';
+    bar.innerHTML = '<span>数据新鲜度</span>'
+      + `<span class="pill ${stale ? 'warn' : 'ok'}">最近入库：${txt}</span>`
+      + (stale
+          ? '<span style="color:var(--warn)">· 采集可能已停摆（电脑睡眠/客户端未开），打开对话说一声即可补采</span>'
+          : '<span class="muted">· 每 2 小时自动采集</span>');
+  }catch(e){ bar.style.display = 'none'; }
 }
 
 function renderSourceBar(){
