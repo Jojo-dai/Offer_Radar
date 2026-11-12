@@ -20,6 +20,7 @@
 | 11 | 自动化被暂停无人知晓 | 手动暂停后遗忘 | 每次排查先查自动化状态；本表 #1 的验证方法兜底 | automation 状态 = ACTIVE |
 | 13 | **点过「不投了 / 已投递」的岗位又出现在岗位池** | 三条路径：①「一键去重」按公司+岗位**跨状态**合并，`bestFirst` 把「不合适」排在最低优先级（STATUS_RANK=5），同组还剩一条待确认时就把"不投"记录删掉、留下待确认那条；② 同一个应用开在两个标签页/设备，A 里点过标记，B 里列表从不重载（旧代码只在动作后或重开页面时刷新）；③ `skipJob` 不校验更新是否命中，写库失败时界面照样刷新，岗位原地不动 | ① 一键去重改为**只在状态完全相同的组内合并**（key = 公司+岗位+状态），跨状态一律不动；② 新增列表新鲜度守卫：窗口获得焦点 / 从后台标签切回，自动重载当前页签（8 秒去抖）；③ `skipJob` 校验 `data.length`，未命中直接提示「状态未写入」；④ 岗位池渲染前后各兜一次状态白名单，非「待确认」永远进不去；⑤ `loadPool`/`loadConfirm` 不再静默吞异常，取数失败会写明"下方可能不是最新" | ① 池子里出现任何 `status <> '待确认'` 的卡片；② `SELECT j.status, count(*) FROM job_events e JOIN jobs j ON j.id=e.job_id WHERE e.event_type IN ('放弃投递','已投递','授权投递') AND j.status='待确认' GROUP BY 1` 必须为空；③ 点「不投了」应立刻 toast「✕ 已移入不投的岗位」 |
 | 14 | 池子超过 2000 条后「智能导入」直接失败 | 导入查重用了 `limit(2000)` 硬截断，云库单次查询上限 1000 行，超限即报错 | 两条导入路径统一改走 `fetchAllJobs(cols)` 键集分页 | 导入任意内容不再报 `DATABASE_RESULT_EXCEED_MAX_ROWS`；查重集合覆盖全部历史状态（含已投递/不投），旧岗位不会因重新导入而复活 |
+| 15 | 前端改完发布后整页按钮全失效 | 把 `bindListFilters()` 的调用放在 `const LIST` 声明之前（TDZ），语法合法、`node --check` 与 `new Function()` 都过，但浏览器加载即抛 ReferenceError，脚本中断 | 新增 `scripts/smoke-frontend.js`：用 Proxy 伪造 DOM/云 SDK 真正执行一遍内联脚本，任何顶层异常都让退出码为 1；发布前必须跑 | `node scripts/smoke-frontend.js ../job-agent/index.html app/index.html` 退出码 = 0 |
 | 12 | 11-12 白天整日无采集、手动请求卡 pending 48 分钟 | 定时任务依赖客户端在线，实际每天只落地 1–2 次，8/18 点整点采集几乎从未成功；漏掉的触发不会回溯 | ① 调度阈值化：白天距上次入库 >8 小时即采（P1），不再等整点；夜间 >14 小时仍强制补采（P1b）；② **前端自动补采**：打开应用发现数据 >8 小时陈旧，自动写 collect_now（90 分钟去抖 + 已有 pending 不重复）；③ 调度铁律 8 明确自动补采请求按 P0 执行；④ pending 不允许跨轮滞留超 2 小时 | 打开应用看新鲜度条：>8 小时应出现「已自动排入补采队列」提示；`agent_tasks` 中不应出现 pending 超过 2 小时 |
 
 ## 二、调度可靠性的真相（必须知道）
@@ -41,6 +42,10 @@
 3. **游标推进**：`liepin-kw-cursor.txt` 和 `linkedin-kw-cursor.txt` 本轮已更新（读取 → 取词 → 写回）。
 4. **登记收尾**：agent_tasks 已置 done/failed，不留 processing。
 5. **打分完成**：新入库岗位全部有 match_score，或 note 注明为什么没打。
+6. **状态一致性**（2026-11-12 新增）：跑一次等价于前端「🩺 数据自检」的三条 SQL，任何一条非空都要写进 note：
+   - 重复：`SELECT company, position, count(*) FROM jobs WHERE owner_id='<uid>' GROUP BY 1,2 HAVING count(*)>1`
+   - 标记丢失：`SELECT j.id FROM job_events e JOIN jobs j ON j.id=e.job_id WHERE e.event_type IN ('放弃投递','已投递','授权投递') AND j.status='待确认'`
+   - 异常状态：`SELECT DISTINCT status FROM jobs WHERE status NOT IN ('待确认','待投递','已投递','已查看','已回复','面试邀请','不合适','已拒绝')`
 
 ## 三、改动纪律（防止"修复"本身变成新事故）
 
@@ -52,3 +57,7 @@
 - **列表只显示白名单状态**：岗位池只允许「待确认」，最新岗位清单只允许「待确认」，已确认投递只允许「待投递」。新增任何列表都要显式过滤，禁止"全量渲染再靠角标区分"。
 - **写状态必须校验命中行数**：`update(...).eq('id',id).select()` 之后必须检查 `data.length`，为 0 就明确报错，不允许"静默刷新界面"。
 - **异常不许静默**：列表加载的 `catch` 里必须给出可见提示，不能让旧 DOM 冒充当前数据。
+- **列表必须分页 + 白名单**（2026-11-12）：任何岗位列表每页 ≤30 条并带筛选（平台/匹配度/新鲜度），禁止一次性渲染上千张卡片；列表只显示白名单状态。
+- **前端改动必须过冒烟测试**（2026-11-12）：发布前跑 `node scripts/smoke-frontend.js ../job-agent/index.html app/index.html`，退出码必须为 0。
+  `node --check` / `new Function(code)` 只验语法，查不出运行期引用错误。真实事故：把 `bindListFilters(...)` 写在 `const LIST` 之前，语法合法但浏览器一加载就抛
+  `ReferenceError: Cannot access 'LIST' before initialization`，整段脚本中断、全站按钮失效，而发布流程毫无异常提示。

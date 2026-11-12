@@ -120,6 +120,15 @@
   .probe{font-size:12.5px;margin-top:10px;padding:9px 11px;border-radius:9px;background:#f8fafc;border:1px solid var(--line);color:var(--sub);line-height:1.6}
   .probe.ok{background:var(--ok-weak);border-color:#bfe7cb;color:var(--ok)}
   .probe.warn{background:var(--warn-weak);border-color:#f3ddb8;color:var(--warn)}
+  /* 分页与筛选（2026-11-12）：池子上千条时不再一次性渲染全部卡片 */
+  .filterbar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:8px 0 12px}
+  .filterbar select{padding:4px 6px;border:1px solid var(--line);border-radius:6px;background:#fff;color:var(--txt);font-size:13px}
+  .filterbar label{font-size:13px;display:flex;align-items:center;gap:4px}
+  .pager{display:flex;gap:10px;align-items:center;justify-content:center;padding:12px 0 2px}
+  .pager .muted{font-size:13px}
+  .audit-out{margin-top:10px;font-size:13px;line-height:1.9}
+  .audit-out .bad{color:#c0392b;font-weight:700}
+  .audit-out .good{color:var(--ok);font-weight:700}
 </style>
 </head>
 <body>
@@ -184,8 +193,10 @@
           <button class="btn" id="smartImportBtn">📥 智能导入（自动识别格式）</button>
           <button class="btn ghost" id="matchBtn">🧮 按画像批量打分</button>
           <button class="btn ghost" id="dedupeBtn">🧹 一键去重</button>
+          <button class="btn ghost" id="auditBtn">🩺 数据自检</button>
           <span class="muted" id="poolHint"></span>
         </div>
+        <div id="auditOut" class="audit-out"></div>
       </div>
       <div class="card">
         <h2>⚡ 手动触发 Agent 自动采集（免等定时点）</h2>
@@ -199,6 +210,12 @@
       </div>
       <div class="card">
         <h2>岗位池 <span class="muted" id="poolCount"></span></h2>
+        <div class="filterbar">
+          <select id="poolPlatform"><option value="">全部平台</option><option value="猎聘">猎聘</option><option value="领英">领英</option></select>
+          <select id="poolMinScore"><option value="0">全部分数</option><option value="60">匹配度 ≥60</option><option value="70">匹配度 ≥70</option><option value="80">匹配度 ≥80</option></select>
+          <label class="muted"><input type="checkbox" id="poolFresh"> 只看 48h 新增</label>
+          <span class="muted">每页 30 条</span>
+        </div>
         <div id="poolList"></div>
       </div>
     </section>
@@ -216,6 +233,12 @@
           <p class="muted">本清单按匹配度从高到低倒序排列，仅显示尚未授权的岗位；你点击「授权投递」过的岗位会自动移入上方「已确认投递」页签。勾选你同意投递的岗位后点击「批量授权」，授权后请到对应平台（猎聘/领英，见「岗位来源」）完成投递，回来点击「已手动投递」，系统才会记录并开始跟踪。</p>
           <div class="row" style="margin:10px 0">
             <button class="btn" id="authBatchBtn">✅ 批量授权选中岗位</button>
+          </div>
+          <div class="filterbar">
+            <select id="confirmPlatform"><option value="">全部平台</option><option value="猎聘">猎聘</option><option value="领英">领英</option></select>
+            <select id="confirmMinScore"><option value="0">全部分数</option><option value="60">匹配度 ≥60</option><option value="70">匹配度 ≥70</option><option value="80">匹配度 ≥80</option></select>
+            <label class="muted"><input type="checkbox" id="confirmFresh"> 只看 48h 新增</label>
+            <span class="muted">每页 30 条</span>
           </div>
           <div id="confirmList"></div>
         </div>
@@ -671,6 +694,54 @@ function dedupeList(list){
 }
 /* 新鲜度：48h 内入库标记 NEW 并置顶，避免被高分老岗位长期压住（2026-11-05 新增） */
 const isNewJob = j => { const t = j && j.created_at ? new Date(j.created_at).getTime() : 0; return !!t && (Date.now() - t) < 48*3600*1000; };
+/* ===== 列表分页 + 筛选（2026-11-12 新增）
+   池子上千条时一次性渲染全部卡片会让浏览器明显卡顿，也翻不到想看的岗位。
+   现在统一"每页 30 条 + 平台/分数/新鲜度筛选"，改筛选自动回到第 1 页。 */
+const PAGE_SIZE = 30;
+const LIST = {
+  pool:    { page: 1, platform: '', minScore: 0, fresh: false },
+  confirm: { page: 1, platform: '', minScore: 0, fresh: false }
+};
+function applyFilters(list, st){
+  return (list||[]).filter(j => {
+    if (st.platform && (j.platform || '猎聘') !== st.platform) return false;
+    if (st.minScore && ((j.match_score ?? -1) < st.minScore)) return false;
+    if (st.fresh && !isNewJob(j)) return false;
+    return true;
+  });
+}
+function clampPage(st, total){
+  const pages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  st.page = Math.min(Math.max(1, st.page), pages);
+  return st.page;
+}
+function pagerHtml(key, total, page){
+  const pages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  if (pages <= 1) return '';
+  return `<div class="pager">`
+    + `<button class="btn ghost small" data-page="${key}:-1" ${page <= 1 ? 'disabled' : ''}>← 上一页</button>`
+    + `<span class="muted">第 ${page} / ${pages} 页 · 共 ${total} 条</span>`
+    + `<button class="btn ghost small" data-page="${key}:1" ${page >= pages ? 'disabled' : ''}>下一页 →</button>`
+    + `</div>`;
+}
+function bindPager(key){
+  const host = key === 'pool' ? '#poolList' : '#confirmList';
+  document.querySelectorAll(`${host} [data-page]`).forEach(b => b.onclick = () => {
+    const parts = b.dataset.page.split(':');
+    LIST[parts[0]].page += Number(parts[1]);
+    if (parts[0] === 'pool') loadPool(); else loadConfirm();
+  });
+}
+function bindListFilters(key, selPlatform, selScore, chkFresh, reload){
+  const st = LIST[key];
+  const ps = $(selPlatform), ss = $(selScore), fc = $(chkFresh);
+  if (ps) ps.onchange = () => { st.platform = ps.value; st.page = 1; reload(); };
+  if (ss) ss.onchange = () => { st.minScore = Number(ss.value) || 0; st.page = 1; reload(); };
+  if (fc) fc.onchange = () => { st.fresh = fc.checked; st.page = 1; reload(); };
+}
+/* 筛选器绑定：必须放在 LIST / bindListFilters 定义之后执行（否则 const 处于 TDZ，整段脚本会中断） */
+bindListFilters('pool', '#poolPlatform', '#poolMinScore', '#poolFresh', loadPool);
+bindListFilters('confirm', '#confirmPlatform', '#confirmMinScore', '#confirmFresh', loadConfirm);
 function sortFreshFirst(list){
   const byScore = (a,b)=>(b.match_score??-1)-(a.match_score??-1);
   return [...list.filter(isNewJob).sort(byScore), ...list.filter(j=>!isNewJob(j)).sort(byScore)];
@@ -798,6 +869,87 @@ $('#dedupeBtn').onclick = async () => {
   }catch(e){ toast('去重失败：' + (e.message||e)); }
   finally{ $('#dedupeBtn').disabled = false; hint('#poolHint',''); }
 };
+/* ===== 🩺 数据自检（2026-11-12 新增）
+   把"标记过的岗位又回池子 / 重复入库 / 状态值异常"变成能自动发现、一键修复的。
+   ① 重复组按「用户意图优先」保留一条：非待确认 > 待确认（绝不删掉"不投/已投递"）
+   ② 有操作日志但状态仍是待确认 → 按最近一次操作恢复状态
+   ③ 状态值不在白名单 → 只报告不自动改（不瞎猜用户意图） */
+const INTENT_RANK = s => (s === '待确认' ? 9 : ((s === '不合适' || s === '已拒绝') ? 1 : 0));
+const EVENT_TO_STATUS = { '放弃投递': '不合适', '授权投递': '待投递', '已投递': '已投递' };
+async function fetchAllEvents(){
+  const all = []; let last = 0;
+  for(;;){
+    const { data, error } = await cloud.database.from('job_events').select('*').gt('id', last).order('id').limit(900);
+    if (error || !data || !data.length) break;
+    all.push(...data);
+    if (data.length < 900) break;
+    last = data[data.length-1].id;
+  }
+  return all;
+}
+async function scanConsistency(){
+  const jobs = await fetchAllJobs();
+  const evs = await fetchAllEvents();
+  const byKey = new Map();
+  (jobs||[]).forEach(j => { const k = dupKey(j); if (!byKey.has(k)) byKey.set(k, []); byKey.get(k).push(j); });
+  const dupGroups = [...byKey.values()].filter(g => g.length > 1);
+  const badStatus = (jobs||[]).filter(j => !STATUSES.includes(j.status));
+  const lastEvent = new Map();
+  (evs||[]).forEach(e => {
+    const id = Number(e.job_id);
+    const prev = lastEvent.get(id);
+    if (!prev || String(e.created_at||'') > String(prev.created_at||'')) lastEvent.set(id, e);
+  });
+  const lostMarks = (jobs||[]).filter(j => j.status === '待确认' && lastEvent.get(Number(j.id)) && EVENT_TO_STATUS[lastEvent.get(Number(j.id)).event_type])
+    .map(j => ({ job: j, want: EVENT_TO_STATUS[lastEvent.get(Number(j.id)).event_type] }));
+  return { jobs: jobs||[], dupGroups, badStatus, lostMarks };
+}
+function renderAudit(r){
+  const out = $('#auditOut');
+  if (!out) return;
+  const dupN = r.dupGroups.reduce((s,g)=>s+g.length-1, 0);
+  out.innerHTML = [
+    r.dupGroups.length ? `<span class="bad">重复岗位：${r.dupGroups.length} 组 / ${dupN} 条多余</span>` : '<span class="good">重复岗位：0</span>',
+    r.lostMarks.length ? `<span class="bad">标记丢失（有操作记录却仍是待确认）：${r.lostMarks.length} 条</span>` : '<span class="good">标记丢失：0</span>',
+    r.badStatus.length ? `<span class="bad">异常状态值：${r.badStatus.length} 条</span>` : '<span class="good">异常状态值：0</span>'
+  ].join('　｜　');
+}
+async function repairConsistency(r){
+  if (!confirm(`发现 ${r.dupGroups.length} 组重复、${r.lostMarks.length} 条标记丢失。\n\n修复规则：\n· 重复组只保留一条，优先保留非待确认的那条（绝不删你的"不投/已投递"记录）\n· 标记丢失的按最近一次操作恢复状态\n\n确认修复？`)) return 0;
+  let fixed = 0;
+  for (const g of r.dupGroups){
+    g.sort((a,b) => (INTENT_RANK(a.status) - INTENT_RANK(b.status))
+      || ((b.match_score ?? -1) - (a.match_score ?? -1))
+      || ((b.source_url ? 1 : 0) - (a.source_url ? 1 : 0)));
+    const keep = g[0];
+    for (const j of g.slice(1)){
+      // 双保险：只删除"待确认"副本，任何带用户意图的记录都不动
+      if (j.status !== '待确认') continue;
+      await cloud.database.from('job_events').update({ job_id: keep.id }).eq('job_id', j.id).select();
+      await cloud.database.from('jobs').delete().eq('id', j.id).select();
+      fixed++;
+    }
+  }
+  for (const it of r.lostMarks){
+    await cloud.database.from('jobs').update({ status: it.want, updated_at: new Date().toISOString() }).eq('id', it.job.id).select();
+    await logEvent(it.job.id, '自检修复', `状态与操作记录不一致，按最近一次操作恢复为「${it.want}」`);
+    fixed++;
+  }
+  return fixed;
+}
+$('#auditBtn').onclick = async () => {
+  try{
+    requireSession();
+    $('#auditBtn').disabled = true;
+    hint('#poolHint','正在扫描全库一致性…', true);
+    const r = await scanConsistency();
+    renderAudit(r);
+    if (!r.dupGroups.length && !r.lostMarks.length) return toast('✅ 数据一致：没有重复、没有标记丢失、没有异常状态');
+    const fixed = await repairConsistency(r);
+    if (fixed){ toast(`🩺 自检修复完成，共处理 ${fixed} 条`); loadPool(); loadConfirm(); }
+  }catch(e){ toast('自检失败：' + (e.message||e)); }
+  finally{ $('#auditBtn').disabled = false; hint('#poolHint',''); }
+};
 $('#matchBtn').onclick = async () => {
   try{
     requireSession();
@@ -880,10 +1032,20 @@ async function loadPool(){
     // 这里在去重之后再兜一次白名单，任何上游脏数据（历史遗留状态、并发写入）都进不来。
     const rawPool = (data||[]).filter(j => j.status === '待确认');
     const { list: pool, hidden } = dedupeList(rawPool);
-    const sortedPool = sortFreshFirst(pool.filter(j => j.status === '待确认'));
-    $('#poolCount').innerHTML = `（待确认 ${sortedPool.length} 个）` + (hidden ? ` <span class="muted">· 已折叠 ${hidden} 条重复</span>` : '');
-    $('#poolList').innerHTML = sortedPool.length ? sortedPool.map(jobCard).join('') : '<div class="empty">岗位池为空，先去粘贴几个猎聘职位描述吧 👆</div>';
+    const allPool = pool.filter(j => j.status === '待确认');
+    const filtered = applyFilters(allPool, LIST.pool);
+    const sortedPool = sortFreshFirst(filtered);
+    const page = clampPage(LIST.pool, sortedPool.length);
+    const shown = sortedPool.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+    $('#poolCount').innerHTML = `（待确认 ${allPool.length} 个`
+      + (filtered.length !== allPool.length ? `，筛选后 <b>${filtered.length}</b>` : '')
+      + `）` + (hidden ? ` <span class="muted">· 已折叠 ${hidden} 条重复</span>` : '');
+    $('#poolList').innerHTML = (shown.length
+      ? shown.map(jobCard).join('')
+      : `<div class="empty">${allPool.length ? '当前筛选条件下没有岗位，换个条件试试' : '岗位池为空，先去粘贴几个猎聘职位描述吧 👆'}</div>`)
+      + pagerHtml('pool', sortedPool.length, page);
     document.querySelectorAll('[data-del]').forEach(b => b.onclick = () => delJob(b.dataset.del));
+    bindPager('pool');
   }catch(e){
     // 不再静默吞异常：取数失败时明确告知，避免把"上一次渲染的旧列表"当成当前数据
     const box = $('#poolList');
@@ -917,11 +1079,14 @@ async function loadConfirm(){
     // 现改为：全量分页取 → 按状态分组 → 组内 48h 新增置顶，再按匹配度排。
     const data = await fetchAllJobs();
     const all = data||[];
-    const pending = sortFreshFirst(dedupeList(all.filter(j=>j.status==='待确认')).list);
+    const pendingAll = dedupeList(all.filter(j=>j.status==='待确认')).list.filter(j=>j.status==='待确认');
+    const pendingSorted = sortFreshFirst(applyFilters(pendingAll, LIST.confirm));
+    const cPage = clampPage(LIST.confirm, pendingSorted.length);
+    const pending = pendingSorted.slice((cPage - 1) * PAGE_SIZE, cPage * PAGE_SIZE);
     const ready = sortFreshFirst(dedupeList(all.filter(j=>j.status==='待投递')).list);
     const skipped = dedupeList(all.filter(j=>j.status==='不合适')).list.sort((a,b)=>(b.match_score??-1)-(a.match_score??-1));
-    const freshCount = pending.filter(isNewJob).length;
-    $('#cntPending').textContent = freshCount ? `${pending.length}（近48h +${freshCount}）` : pending.length;
+    const freshCount = pendingAll.filter(isNewJob).length;
+    $('#cntPending').textContent = freshCount ? `${pendingAll.length}（近48h +${freshCount}）` : pendingAll.length;
     $('#cntDone').textContent = ready.length;
     $('#cntSkip').textContent = skipped.length;
     $('#confirmList').innerHTML = pending.length ? pending.map(j=>`
@@ -936,6 +1101,7 @@ async function loadConfirm(){
           <button class="btn danger small" data-skip="${j.id}">✕ 不投了</button>
         </div>
       </div>`).join('') : '<div class="empty">没有待确认的岗位。去「② 岗位池」导入并打分吧。</div>';
+    $('#confirmList').innerHTML += pagerHtml('confirm', pendingSorted.length, cPage);
     $('#readyList').innerHTML = ready.length ? ready.map(j=>`
       <div class="job">
         <div class="head"><span><span class="plat plat-${esc(j.platform||'猎聘')}">${esc(j.platform||'猎聘')}</span> <span class="company">${esc(j.company)}</span> · <span class="pos">${esc(j.position)}</span></span><span class="badge st-待投递">已授权 · 待投递</span></div>
@@ -961,6 +1127,7 @@ async function loadConfirm(){
     document.querySelectorAll('[data-skip]').forEach(b => b.onclick = () => skipJob(b.dataset.skip));
     document.querySelectorAll('[data-sent]').forEach(b => b.onclick = () => markSent(b.dataset.sent));
     document.querySelectorAll('[data-restore]').forEach(b => b.onclick = () => restoreJob(b.dataset.restore));
+    bindPager('confirm');
   }catch(e){
     const box = $('#confirmList');
     if (box) box.innerHTML = `<div class="empty">读取投递清单失败：${esc(e.message||e)}。下方内容可能不是最新，请刷新页面重试。</div>`;
