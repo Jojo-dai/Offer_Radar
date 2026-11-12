@@ -56,13 +56,15 @@ node collect_liepin.js   # 打开搜索结果页 → 解析 .job-card 节点 →
 
 ## 2. 定时调度替代方案
 
-WorkBuddy 的三个定时任务在别的环境里等价替换为：
+WorkBuddy 的**单个总调度任务**（每 2 小时一次、阈值分派）在别的环境里等价替换为：
 
 | 环境 | 方案 | 说明 |
 |---|---|---|
-| Linux/macOS 服务器 | `cron` | `0 0,10 * * *`（UTC 对应北京时间 08:00/18:00）+ 每小时看门狗 |
-| Windows 本机 | 任务计划程序 | 同上三条，`schtasks /create` 即可 |
+| Linux/macOS 服务器 | `cron` | `0 */2 * * *` 触发一次，由脚本自己判断"距上次入库是否 >8h" |
+| Windows 本机 | 任务计划程序 | 同上，`schtasks /create /sc hourly /mo 2` |
 | 任何 Agent CLI | 系统级 cron 触发 agent 无头执行 | 把 `docs/05-automations.md` 的 prompt 逻辑改写成脚本 |
+
+> 关键不是触发频率，而是**触发时先判断数据是否陈旧**。别退回「只在 8:00 / 18:00 跑」——错过一次就是整天没有新岗位。
 
 **不建议 GitHub Actions 做领英采集**：出口是海外数据中心 IP，触发风控概率高；做猎聘也浪费额度。
 

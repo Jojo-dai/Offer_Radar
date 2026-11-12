@@ -99,9 +99,9 @@
 
 【第3步：写入岗位池——全状态查重（本步是本任务最关键的约束，必须严格执行）】
 3.0 地点收窄（先做）：只保留 location 含「上海 / Shanghai / 远程 / Remote / 全国」之一的候选，外地一律跳过并计入「外地跳过」数。2026-10-29 实测猎聘 111 条去重后仅 24 条在上海。
-3.1 先取全量存量（不限状态）：mode=read 执行
-SELECT id, company, position, source_url, salary, location, status, match_score FROM jobs WHERE owner_id='<owner_id>' ORDER BY id LIMIT 2000
-【查重取数：必须分页】存量岗位一律用 `python job-apply-agent/scripts/dump-existing.py` 导出，不要手写 `SELECT ... LIMIT 2000`。
+3.1 先取全量存量（不限状态）：执行
+python job-apply-agent/scripts/dump-existing.py
+【查重取数：必须分页】存量岗位**只能**通过该脚本导出（id 键集分页，每页 900），禁止手写 `SELECT ... LIMIT 2000`。
 > **云库单次查询上限 1000 行**（`DATABASE_RESULT_EXCEED_MAX_ROWS`）。岗位池 2026-11-09 已达 1150 条，一次拉全量会直接报错、整轮采集中断在查重这一步。脚本按 id 键集分页（每页 900），池子涨到几万条也稳。
 
 【查重范围：全状态】必须把返回的全部记录都放进比对集合，涵盖 待确认 / 待投递 / 已查看 / 已投递 / 面试中 / 不合适 / 已拒绝 等所有状态。绝不能只比对 status='待确认' 的记录——已投递或已拒绝的岗位同样算「已存在」，不得再次作为新岗位写入。**此条为最高优先级硬约束（用户 2026-11-05 再次确认）：任何关键词、翻页或流程优化都不得放宽，也不得改成"仅比对近 N 天"。**
@@ -109,7 +109,7 @@ SELECT id, company, position, source_url, salary, location, status, match_score 
 3.3 逐条判定（对猎聘 + 领英的每一个采集结果）：
   a) 岗位键命中存量集合 或 命中本轮已入库集合 → 判定为重复，直接跳过，不写入、不改状态、不打分，重复计数 M+1。即使链接不同、平台不同、薪资不同也必须跳过。
   b) 链接兜底：source_url 去掉 ? 与 # 及其后内容后与存量完全相同 → 也判定重复跳过。
-  c) 仅当岗位键与链接都未命中时，才 INSERT INTO jobs (owner_id, owner_name, company, position, jd_summary, salary, location, source_url, platform, status) VALUES ('<owner_id>', '<owner_name>', '<company>', '<position>', '<tags 或「自动采集：详情见职位链接」>', '<salary 或「面议」>', '<location>', '<link>', '<猎聘/领英>', '待确认')；写入后立刻把该岗位键加入本轮已入库集合。单轮总入库上限 120 条。
+  c) 仅当岗位键与链接都未命中时，才 INSERT INTO jobs (owner_id, owner_name, company, position, jd_summary, salary, location, source_url, platform, status) VALUES ('<owner_id>', '<owner_name>', '<company>', '<position>', '<tags 或「自动采集：详情见职位链接」>', '<salary 或「面议」>', '<location>', '<link>', '<猎聘/领英>', '待确认')；写入后立刻把该岗位键加入本轮已入库集合。单轮总入库上限 200 条。
   d) 存量中有同一岗位但字段缺失（库中无链接而新采集有链接；或库中 salary/location 为空）→ 不新增，改为 UPDATE jobs SET source_url=COALESCE(source_url,'<新链接>'), salary=CASE WHEN salary IS NULL OR salary='' THEN '<新薪资>' ELSE salary END, location=CASE WHEN location IS NULL OR location='' THEN '<新地点>' ELSE location END, updated_at=now() WHERE id=<存量id>。补齐字段可以，但绝不改变原 status、绝不重新打分为待确认。
 3.4 入库后自检（必须执行）：mode=read 执行
 SELECT company, position, count(*) AS cnt FROM jobs WHERE owner_id='<owner_id>' GROUP BY company, position HAVING count(*)>1 ORDER BY cnt DESC
@@ -177,14 +177,15 @@ UPDATE agent_tasks SET status='failed', note='失败原因：运行超时无响�
 【地点收窄】写库前只保留上海/远程/全国（location 含「上海 / Shanghai / 远程 / Remote / 全国」之一）；外地岗位一律跳过并在汇总里报数。2026-10-29 实测猎聘单轮 111 条去重后仅 24 条在上海，不加这层过滤会持续稀释清单。
 
 【第5步：写入岗位池——全状态查重（本步是最关键约束，必须严格执行）】
-5.1 先取全量存量（不限状态）：mode=read 执行
-SELECT id, company, position, source_url, salary, location, status, match_score FROM jobs WHERE owner_id='<owner_id>' ORDER BY id LIMIT 2000
+5.1 先取全量存量（不限状态）：执行
+python job-apply-agent/scripts/dump-existing.py
+（禁止手写 `SELECT ... LIMIT 2000`：云库单次上限 1000 行，会直接报错）
 【查重范围：全状态】返回的全部记录都进入比对集合，涵盖 待确认 / 待投递 / 已查看 / 已投递 / 面试中 / 不合适 / 已拒绝 等所有状态。绝不能只比对 status='待确认'——已投递或已拒绝的岗位同样算「已存在」，不得再次作为新岗位写入。
 5.2 规范化函数：公司名、岗位名分别 转小写 → 删除「招聘/诚聘/急招/热招/岗位名称/职位名称/岗位/职位」等字样 → 删除所有空格（含全角空格）与标点（全角括号、英文括号、方括号、斜杠、反斜杠、连字符、下划线、顿号、逗号、句点、冒号、分号、加号、星号、引号等）。得到 norm(company)+'|'+norm(position) 即岗位键。
 5.3 逐条判定（猎聘 + 领英的每一条）：
   a) 岗位键命中存量集合 或 命中本轮已入库集合 → 重复，直接跳过（不写入、不改状态、不打分），M+1。即使链接不同、平台不同、薪资不同也必须跳过。
   b) 链接兜底：source_url 去掉 ? 与 # 及其后内容后与存量完全相同 → 也跳过。
-  c) 仅当两者都未命中才 INSERT INTO jobs (owner_id, owner_name, company, position, jd_summary, salary, location, source_url, platform, status) VALUES ('<owner_id>', '<owner_name>', '<company>', '<title>', '<tags 或「自动采集：详情见职位链接」>', '<salary 或「面议」>', '<location>', '<link>', '<猎聘/领英>', '待确认')；写入后把岗位键加入本轮集合。单轮上限 120 条。
+  c) 仅当两者都未命中才 INSERT INTO jobs (owner_id, owner_name, company, position, jd_summary, salary, location, source_url, platform, status) VALUES ('<owner_id>', '<owner_name>', '<company>', '<title>', '<tags 或「自动采集：详情见职位链接」>', '<salary 或「面议」>', '<location>', '<link>', '<猎聘/领英>', '待确认')；写入后把岗位键加入本轮集合。单轮上限 200 条。
   d) 存量同岗位但字段缺失（无链接/薪资空/地点空）→ 不新增，改为 UPDATE jobs SET source_url=COALESCE(source_url,'<新链接>'), salary=CASE WHEN salary IS NULL OR salary='' THEN '<新薪资>' ELSE salary END, location=CASE WHEN location IS NULL OR location='' THEN '<新地点>' ELSE location END, updated_at=now() WHERE id=<存量id>；绝不改原 status、绝不重置为待确认。
 5.4 入库后自检（必须执行）：mode=read 执行
 SELECT company, position, count(*) AS cnt FROM jobs WHERE owner_id='<owner_id>' GROUP BY company, position HAVING count(*)>1 ORDER BY cnt DESC

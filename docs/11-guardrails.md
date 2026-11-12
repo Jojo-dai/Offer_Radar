@@ -58,6 +58,7 @@
 - **写状态必须校验命中行数**：`update(...).eq('id',id).select()` 之后必须检查 `data.length`，为 0 就明确报错，不允许"静默刷新界面"。
 - **异常不许静默**：列表加载的 `catch` 里必须给出可见提示，不能让旧 DOM 冒充当前数据。
 - **列表必须分页 + 白名单**（2026-11-12）：任何岗位列表每页 ≤30 条并带筛选（平台/匹配度/新鲜度），禁止一次性渲染上千张卡片；列表只显示白名单状态。
+- **文档与实跑必须同步**（2026-11-12）：改了调度/上限/流程，同一提交里必须改 README、AGENTS 与对应 docs。历史教训：调度早已改成"总调度 + 阈值分派"，文档却还写着"三个定时任务 8:00/18:00"，复刻的人照文档做就会复现"整天不采"。
 - **前端改动必须过冒烟测试**（2026-11-12）：发布前跑 `node scripts/smoke-frontend.js ../job-agent/index.html app/index.html`，退出码必须为 0。
   `node --check` / `new Function(code)` 只验语法，查不出运行期引用错误。真实事故：把 `bindListFilters(...)` 写在 `const LIST` 之前，语法合法但浏览器一加载就抛
   `ReferenceError: Cannot access 'LIST' before initialization`，整段脚本中断、全站按钮失效，而发布流程毫无异常提示。

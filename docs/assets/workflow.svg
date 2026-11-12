@@ -66,7 +66,7 @@
 
   <!-- ============ Band 2 ============ -->
   <rect x="40" y="336" width="920" height="246" rx="16" fill="#f8fafc" stroke="#e2e8f0" stroke-width="1.5"/>
-  <text x="62" y="362" font-size="13" font-weight="700" fill="#475569" letter-spacing="0.5">阶段二 · 日常循环（每天 08:00 / 18:00）</text>
+  <text x="62" y="362" font-size="13" font-weight="700" fill="#475569" letter-spacing="0.5">阶段二 · 日常循环（数据超 8 小时即补采）</text>
 
   <!-- N4 agent -->
   <rect x="62" y="380" width="195" height="98" rx="12" fill="#eff6ff" stroke="#2563eb" stroke-width="1.8"/>
@@ -111,7 +111,7 @@
   <rect x="428" y="503" width="144" height="18" fill="#f8fafc"/>
   <text x="500" y="516" font-size="11" fill="#15803d" text-anchor="middle">↻ 下一轮，回到第 4 步</text>
 
-  <text x="62" y="546" font-size="11" fill="#64748b">定时：08:00 / 18:00 采集 + 打分　·　每小时看门狗消费手动请求　·　09:30 / 19:30 同步投递反馈</text>
+  <text x="62" y="546" font-size="11" fill="#64748b">采集：距上次入库 &gt;8h 触发（夜间 &gt;14h 强制补采）　·　看门狗消费手动/自动请求　·　每日两次反馈同步</text>
   <text x="62" y="566" font-size="11" fill="#64748b">去重：与库内「待确认 / 待投递 / 已查看 / 已投递 / 不合适」全状态比对，命中即跳过，绝不重复入库</text>
 
   <!-- ============ Legend ============ -->

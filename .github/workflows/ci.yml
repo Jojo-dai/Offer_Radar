@@ -1,0 +1,61 @@
+name: CI
+
+# 这个仓库是单文件应用 + 单文件脚本，没有构建步骤，所以 CI 只做三件"能被自动化抓住"的事：
+#   1) 前端内联脚本真的能跑起来（语法合法 != 能跑，TDZ/引用错误会让整站按钮失效而发布流程显示成功）
+#   2) Python 脚本语法可编译
+#   3) 文档相对链接不断（说明书点进去 404 比代码报错更隐蔽）
+# 任何一项失败都会红叉，阻断"看起来发布成功"的错觉。
+
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  frontend-smoke:
+    name: 前端冒烟（内联脚本可执行）
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: 执行 app/index.html 内联脚本
+        run: node scripts/smoke-frontend.js app/index.html
+
+  python-syntax:
+    name: Python 语法
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: py_compile 全部脚本
+        run: python -m py_compile scripts/collect-linkedin-guest.py scripts/dump-existing.py scripts/score_jobs.py scripts/check-docs-links.py
+      - name: 配置示例必须是合法 JSON
+        run: python -c "import json; json.load(open('config/config.example.json', encoding='utf-8')); print('config.example.json OK')"
+
+  docs:
+    name: 文档链接
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: 相对链接可达性
+        run: python scripts/check-docs-links.py
+      - name: README 必须包含最新防线章节与四条新增脚本说明
+        run: |
+          set -e
+          grep -q "稳定性防线" README.md
+          grep -q "11-guardrails.md" README.md
+          grep -q "smoke-frontend.js" README.md
+          grep -q "dump-existing.py" README.md
+          echo "README 关键章节齐全"

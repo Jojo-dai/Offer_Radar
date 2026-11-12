@@ -15,7 +15,7 @@
 - [ ] 上传一份 docx 简历 → 能解析出文本 → 生成画像 → 画像可确认（`profiles.confirmed = true`）
 - [ ] 粘贴 `samples/demo-jobs.json` 到「智能导入」→ 提示导入 6 条、跳过重复 0 条
 - [ ] 点「🧮 按画像批量打分」→ 6 条岗位出现 0-100 分数与 ≤30 字理由
-- [ ] 3 个定时任务存在，时间分别为 08:00 / 18:00 / 每小时
+- [ ] 调度任务是**单个总调度**（`FREQ=HOURLY;INTERVAL=2`），prompt 内含阈值分派：白天距上次入库 >8h 采集、夜间 >14h 强制补采、`pending` 超 30min 优先消费；**不允许**退回「只认 8:00 / 18:00 整点」的写法
 - [ ] `bash scripts/check-network.sh` 接口实测返回卡片；未过时领英段必须跳过（不抓 linkedin.cn，也不凭 IP 判 CN 就跳过）
 - [ ] 手动点「⚡ 通知 Agent 立即采集」→ `agent_tasks` 出现 1 条 `pending` 记录 → 下一小时检查点消费后变 `done` / `failed`（含原因）
 - [ ] `docs/assets/architecture.svg` 与 `docs/assets/workflow.svg` 存在且被 README 引用（整体架构 + 七步工作流各一张）
@@ -215,13 +215,21 @@ WorkBuddy 的 `mcp__browser__*` 工具在别的环境不存在，采集层按 `d
 
 ---
 
-## 5. 三个定时任务（prompt 全文见 `docs/05-automations.md`）
+## 5. 调度任务（prompt 全文见 `docs/05-automations.md`）
 
-| 任务 | 频率 | 职责 |
+**单个总调度任务**（`FREQ=HOURLY;INTERVAL=2`）按阈值分派，不再依赖整点：
+
+| 优先级 | 条件 | 执行 |
 |---|---|---|
-| 采集（早） | `FREQ=DAILY;BYHOUR=8;BYMINUTE=0` | 猎聘 + 领英采集 → 全状态查重入库 → 打分 → 登记 |
-| 采集（晚） | `FREQ=DAILY;BYHOUR=18;BYMINUTE=0` | 同上 |
-| 检查点 | `FREQ=HOURLY;INTERVAL=1` | ① 看门狗切断超时运行 ② 消费 `collect_now` 请求 |
+| P0 | 存在 `collect_now` / `pending` 且距上次采集 > 30min | 采集 + 打分（消费手动/自动补采请求） |
+| P1 | 距上次入库 > 8h 且当前 7–22 点 | 采集 + 打分（不看整点） |
+| P1b | 距上次入库 > 14h | 采集 + 打分（**任何时段**，含深夜；睡眠/关机后的自愈通道） |
+| P2 | 当前 8 点或 18 点 | 采集 + 打分（整点兜底，与 P1 重合时只跑一次） |
+| P3 | 当前 10 点或 20 点 | 反馈同步 |
+| P4 | 当前 7–21 点 | 看门狗（切超时 `processing` + 消费请求） |
+| P5 | 其余 | 空转退出，不登记 |
+
+> 为什么不能只靠整点：本机自动化依赖客户端在线，休眠即丢触发且不回溯。实测三天仅落地 1–2 次/天。阈值化后每次触发都有活干。
 
 任务执行顺序（每个采集任务内部）：
 
@@ -238,11 +246,11 @@ WorkBuddy 的 `mcp__browser__*` 工具在别的环境不存在，采集层按 `d
 
 **查重规则（第 3 步，最易写错，务必逐字实现）**
 
-1. 取存量：`SELECT id, company, position, source_url, salary, location, status, match_score FROM jobs WHERE owner_id='<uid>' ORDER BY id LIMIT 2000` —— **不加 status 过滤**
+1. 取存量：跑 `python scripts/dump-existing.py`（**id 键集分页，每页 900**）——云库单次查询上限 1000 行，手写 `LIMIT 2000` 会直接报错；**不加 status 过滤**
 2. 岗位键 `normTxt(company) + '|' + normTxt(position)`；链接键 `source_url` 去掉 `?`/`#` 及其后内容并小写
 3. 岗位键命中存量或命中本轮已入库 → 跳过（`M+1`），**即使链接/平台/薪资不同**
 4. 链接键命中 → 跳过
-5. 都未命中 → `INSERT`，并把岗位键加入本轮集合；单轮上限 120 条
+5. 都未命中 → `INSERT`，并把岗位键加入本轮集合；单轮上限 200 条（`MAX_INSERT_PER_RUN`）
 6. 存量有同岗位但缺链接 / 薪资空 / 地点空 → **不新增**，`UPDATE ... COALESCE` 补字段，**不动 status**
 7. 入库后必跑 `GROUP BY company, position HAVING count(*)>1`，有结果则按 `bestFirst` 保留一条，其余先迁 `job_events` 再删
 
@@ -285,10 +293,19 @@ score = round(0.35*技能 + 0.15*行业 + 0.20*职级经验 + 0.15*薪资地点 
 ## 8. 验收脚本
 
 ```bash
-# 网络
+# ① 网络门禁（接口实测，不看 IP）
 bash scripts/check-network.sh
 
-# 数据一致性（在云数据库执行）
+# ② 前端内联脚本可执行（能抓 TDZ / 引用错误，语法检查抓不到）
+node scripts/smoke-frontend.js app/index.html
+
+# ③ Python 脚本语法
+python -m py_compile scripts/collect-linkedin-guest.py scripts/dump-existing.py scripts/score_jobs.py
+
+# ④ 文档相对链接不断
+python scripts/check-docs-links.py
+
+# ⑤ 数据一致性（在云数据库执行）
 # 1) 不应存在重复岗位
 SELECT company, position, count(*) FROM jobs GROUP BY 1,2 HAVING count(*)>1;
 # 2) 不应存在超过 2 小时的 processing
@@ -296,7 +313,15 @@ SELECT id FROM agent_tasks WHERE status='processing' AND requested_at < now() - 
 # 3) 已投递岗位必须都有事件
 SELECT j.id FROM jobs j LEFT JOIN job_events e ON e.job_id=j.id
  WHERE j.status='已投递' AND e.id IS NULL;
+# 4) 不应存在"有操作日志却仍是待确认"的岗位（标记丢失）
+SELECT j.id, j.company, j.position FROM job_events e JOIN jobs j ON j.id=e.job_id
+ WHERE e.event_type IN ('放弃投递','已投递','授权投递') AND j.status='待确认';
+# 5) 状态值必须在白名单内
+SELECT DISTINCT status FROM jobs
+ WHERE status NOT IN ('待确认','待投递','已投递','已查看','已回复','面试邀请','不合适','已拒绝');
 ```
+
+> ①–④ 已固化在 `.github/workflows/ci.yml`，push 即跑；⑤ 在应用里点「🩺 数据自检」等价执行。
 
 ---
 
@@ -311,3 +336,8 @@ SELECT j.id FROM jobs j LEFT JOIN job_events e ON e.job_id=j.id
 5. 采集时把已有岗位重置为 `待确认`（会让人重复投递）
 6. 在领英重定向后改走直连继续抓取
 7. 用盲轮询（如每 20 分钟）替代事件对齐刷新
+8. 把调度退回「只认 8:00 / 18:00 整点」——实测会整天不采
+9. 手写 `SELECT ... FROM jobs LIMIT 2000` 取全量——必崩在 1000 行上限
+10. 声称「前端改完」但没跑 `node scripts/smoke-frontend.js`——语法过了照样可能整站白屏
+
+> 每类历史故障的根因 / 防线 / 验证方法见 `docs/11-guardrails.md`；改动前先读那份台账。

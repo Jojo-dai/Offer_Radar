@@ -98,10 +98,15 @@
   },
 
   "schedule": {
-    "collect": ["08:00", "18:00"],
-    "feedbackSync": ["09:30", "19:30"],
+    "_comment": "2026-11-12 起改为阈值分派：本机定时器不可靠（休眠即丢触发、不回溯），不再依赖整点。",
+    "mode": "threshold",
+    "triggerIntervalHours": 2,
+    "collectIfStaleHours": { "day": 8, "night": 14 },
+    "dayRange": [7, 22],
+    "pendingConsumeWindowMinutes": 30,
+    "feedbackSync": ["10:00", "20:00"],
     "dashboardRefresh": ["08:40", "10:00", "18:40", "20:00"],
-    "watchdog": "hourly",
+    "watchdog": "on-trigger",
     "stuckThresholdMinutes": 120,
     "duplicateRunGuardMinutes": 90
   }

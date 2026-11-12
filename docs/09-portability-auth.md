@@ -44,7 +44,7 @@
 定时任务的生产 prompt 里，几乎每条 SQL 都显式带着 `owner_id`：
 
 ```sql
-SELECT … FROM jobs WHERE owner_id='<owner_id>' ORDER BY id LIMIT 2000
+SELECT … FROM jobs WHERE owner_id='<owner_id>' ORDER BY id LIMIT 900   -- 分页，云库单次上限 1000 行
 INSERT INTO agent_tasks (owner_id, …) VALUES ('<owner_id>', …)
 ```
 
@@ -81,7 +81,7 @@ const publicConfig = {
 };
 ```
 
-③ 三个定时任务的 `applicationId` 换成自己的 `wbapp_...`。
+③ 调度任务的 `applicationId` 换成自己的 `wbapp_...`。
 
 身份链自动继承：登录走 OAuth → JWT → `auth.uid()` → RLS。
 

@@ -68,15 +68,15 @@
   <text x="484" y="404" font-size="11" fill="#2563eb">写入：岗位 · 分数 · 事件 · 运行状态</text>
 
   <!-- Layer 3: 定时任务 -->
-  <text x="40" y="424" font-size="13" font-weight="700" fill="#64748b" letter-spacing="1">③ 定时任务（Agent 侧）</text>
+  <text x="40" y="424" font-size="13" font-weight="700" fill="#64748b" letter-spacing="1">③ 调度（Agent 侧 · 1 个总调度）</text>
   <rect x="40" y="438" width="420" height="122" rx="14" fill="#eff6ff" stroke="#bfdbfe" stroke-width="1.5"/>
-  <text x="62" y="466" font-size="13" font-weight="700" fill="#1d4ed8">① 08:00　采集 + 打分</text>
-  <text x="62" y="488" font-size="13" font-weight="700" fill="#1d4ed8">② 18:00　采集 + 打分</text>
+  <text x="62" y="466" font-size="13" font-weight="700" fill="#1d4ed8">总调度 · 每 2 小时触发（阈值分派）</text>
+  <text x="62" y="488" font-size="13" font-weight="700" fill="#1d4ed8">白天 &gt;8h / 夜间 &gt;14h → 采集 + 打分</text>
   <text x="62" y="514" font-size="11" fill="#3b82f6">全状态查重 · 入库 · JEV 五维打分 · 登记运行记录</text>
   <text x="62" y="536" font-size="11" fill="#3b82f6">防重复补跑守卫：90 分钟内已在跑则静默退出</text>
 
   <rect x="480" y="438" width="480" height="122" rx="14" fill="#f0fdf4" stroke="#bbf7d0" stroke-width="1.5"/>
-  <text x="502" y="466" font-size="13" font-weight="700" fill="#15803d">③ 每小时　看门狗 + 消费手动请求</text>
+  <text x="502" y="466" font-size="13" font-weight="700" fill="#15803d">看门狗 · 消费手动/自动补采请求</text>
   <text x="502" y="490" font-size="11" fill="#166534">· 超过 2 小时仍 processing → 标 failed（失败原因：运行超时）</text>
   <text x="502" y="512" font-size="11" fill="#166534">· 取 collect_now / pending → 执行一轮手动采集</text>
   <text x="502" y="534" font-size="11" fill="#166534">· 重复点击 → 合并为一轮（merged）</text>
