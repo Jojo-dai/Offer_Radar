@@ -361,14 +361,33 @@ function requireSession(){ if (!session) { showLogin(); throw new Error('请先�
 
 /* ===== Tab 切换 ===== */
 document.querySelectorAll('nav.tabs button').forEach(b => b.onclick = () => switchTab(b.dataset.tab));
+let activeTab = 'profile';
 function switchTab(name){
   document.querySelectorAll('nav.tabs button').forEach(b => b.classList.toggle('active', b.dataset.tab === name));
   document.querySelectorAll('.tab-view').forEach(v => v.classList.remove('active'));
   $('#tab-' + name).classList.add('active');
+  activeTab = name;
   if (name === 'dash') loadDashboard();
   if (name === 'confirm') loadConfirm();
   if (name === 'pool') loadPool();
 }
+/* 列表新鲜度守卫（2026-11-12 新增）
+   旧实现只有在"点了动作"或"重新打开页面"时才重载列表。如果同一个应用开在两个
+   标签页/两台设备上，你在 A 里点过「不投了」，B 里仍会长期显示旧列表——看起来
+   就是"点了不投却还在池子里"。现在窗口重新获得焦点、或从后台标签切回来，都会
+   自动重载当前页签的列表，8 秒内不重复请求。 */
+let lastAutoReload = 0;
+function reloadActiveTab(){
+  if (!session) return;
+  const now = Date.now();
+  if (now - lastAutoReload < 8000) return;
+  lastAutoReload = now;
+  if (activeTab === 'confirm') loadConfirm();
+  else if (activeTab === 'pool') loadPool();
+  else if (activeTab === 'dash') loadDashboard();
+}
+document.addEventListener('visibilitychange', () => { if (!document.hidden) reloadActiveTab(); });
+window.addEventListener('focus', () => reloadActiveTab());
 
 /* ===== 投递清单内分页签切换 ===== */
 document.querySelectorAll('nav.subtabs button').forEach(b => b.onclick = () => {
@@ -671,10 +690,11 @@ $('#smartImportBtn').onclick = async () => {
     if (arr && arr.length && arr.some(x => x && (x.company || x.title || x.position))){
       hint('#poolHint','识别为书签 JSON，正在批量导入去重…', true);
       arr = arr.slice(0, 60);
-      const { data: exist } = await cloud.database.from('jobs').select('company,position,source_url,platform').gt('id', 0).order('id').limit(2000);
+      // 全量分页取（云库单次 1000 行上限，硬写 limit(2000) 会直接报错导致导入失败）
+      const exist = await fetchAllJobs('company,position,source_url,platform');
       const key = j => dupKey(j);
       const urlKey = u => String(u||'').trim().replace(/[?#].*$/,'').toLowerCase();
-      const seen = new Set((exist||[]).map(key));
+      const seen = new Set((exist||[]).map(key));  // 含全部历史状态（含已投递/不投），导入不会让旧岗位复活
       const seenUrl = new Set((exist||[]).map(j=>urlKey(j.source_url)).filter(Boolean));
       let ok = 0, dup = 0;
       for (const it of arr){
@@ -708,7 +728,7 @@ $('#smartImportBtn').onclick = async () => {
       hint('#poolHint','识别为 JD 文本，AI 正在解析…', true);
       const chunks = raw.split(/\n\s*---\s*\n/).map(s=>s.trim()).filter(s=>s.length>20).slice(0,10);
       const url = $('#jobUrl').value.trim() || null;
-      const { data: exist2 } = await cloud.database.from('jobs').select('company,position,source_url').gt('id', 0).order('id').limit(2000);
+      const exist2 = await fetchAllJobs('company,position,source_url');
       const seen2 = new Set((exist2||[]).map(j=>dupKey(j)));
       const urlKey2 = u => String(u||'').trim().replace(/[?#].*$/,'').toLowerCase();
       const seenUrl2 = new Set((exist2||[]).map(j=>urlKey2(j.source_url)).filter(Boolean));
@@ -748,12 +768,17 @@ $('#dedupeBtn').onclick = async () => {
     $('#dedupeBtn').disabled = true; hint('#poolHint','正在扫描重复岗位…', true);
     const data = await fetchAllJobs();
     const map = new Map();
-    (data||[]).forEach(j => { const k = dupKey(j); if (!map.has(k)) map.set(k, []); map.get(k).push(j); });
+    // 2026-11-12 修正：只在「状态完全相同」的记录之间合并。
+    // 旧实现按公司+岗位跨状态合并，而 bestFirst 把「不合适」排在最低优先级
+    // （STATUS_RANK=5），于是同组里只要还剩一条待确认，就会把你点过"不投"的那条
+    // 删掉、留下待确认那条 —— 岗位重新回到池子里，标记凭空消失。
+    (data||[]).forEach(j => { const k = dupKey(j) + '\u0001' + (j.status||''); if (!map.has(k)) map.set(k, []); map.get(k).push(j); });
     const groups = [...map.values()].filter(g => g.length > 1);
     const total = groups.reduce((s,g)=>s+g.length-1, 0);
     if (!total) return toast('✅ 没有发现重复岗位，库很干净');
     const sample = groups.slice(0,5).map(g=>{ g.sort(bestFirst); return `· ${g[0].company} · ${g[0].position}（${g.length} 条 → 保留 1 条）`; }).join('\n');
-    if (!confirm(`发现 ${groups.length} 组共 ${total} 条重复岗位：\n\n${sample}${groups.length>5?'\n…':''}\n\n每组保留「进度最靠前 + 匹配度最高 + 有链接」的那一条，其余删除。确认清理？`)) return;
+    if (!confirm(`发现 ${groups.length} 组共 ${total} 条重复岗位：\n\n${sample}${groups.length>5?'\n…':''}\n\n同一状态内保留「匹配度最高 + 有链接」的那一条，其余删除；
+不同状态之间绝不合并（避免误删"不投/已投递"的记录）。确认清理？`)) return;
     let moved = 0, removed = 0;
     for (const g of groups){
       g.sort(bestFirst);
@@ -851,13 +876,20 @@ async function loadPool(){
     requireSession();
     // 全量分页取，防止池子超 1000 后旧岗位整段不可见
     const data = await fetchAllJobs();
+    // 铁律：岗位池只允许出现「待确认」。已投递 / 待投递 / 不合适 / 已拒绝 一律不显示。
+    // 这里在去重之后再兜一次白名单，任何上游脏数据（历史遗留状态、并发写入）都进不来。
     const rawPool = (data||[]).filter(j => j.status === '待确认');
     const { list: pool, hidden } = dedupeList(rawPool);
-    const sortedPool = sortFreshFirst(pool);
+    const sortedPool = sortFreshFirst(pool.filter(j => j.status === '待确认'));
     $('#poolCount').innerHTML = `（待确认 ${sortedPool.length} 个）` + (hidden ? ` <span class="muted">· 已折叠 ${hidden} 条重复</span>` : '');
     $('#poolList').innerHTML = sortedPool.length ? sortedPool.map(jobCard).join('') : '<div class="empty">岗位池为空，先去粘贴几个猎聘职位描述吧 👆</div>';
     document.querySelectorAll('[data-del]').forEach(b => b.onclick = () => delJob(b.dataset.del));
-  }catch(e){}
+  }catch(e){
+    // 不再静默吞异常：取数失败时明确告知，避免把"上一次渲染的旧列表"当成当前数据
+    const box = $('#poolList');
+    if (box) box.innerHTML = `<div class="empty">读取岗位池失败：${esc(e.message||e)}。下方内容可能不是最新，请刷新页面重试。</div>`;
+    toast('岗位池读取失败：' + (e.message||e));
+  }
 }
 function jobCard(j){
   const score = j.match_score != null ? `<span class="score">匹配度 ${j.match_score}</span>` : '<span class="muted">未打分</span>';
@@ -929,7 +961,11 @@ async function loadConfirm(){
     document.querySelectorAll('[data-skip]').forEach(b => b.onclick = () => skipJob(b.dataset.skip));
     document.querySelectorAll('[data-sent]').forEach(b => b.onclick = () => markSent(b.dataset.sent));
     document.querySelectorAll('[data-restore]').forEach(b => b.onclick = () => restoreJob(b.dataset.restore));
-  }catch(e){}
+  }catch(e){
+    const box = $('#confirmList');
+    if (box) box.innerHTML = `<div class="empty">读取投递清单失败：${esc(e.message||e)}。下方内容可能不是最新，请刷新页面重试。</div>`;
+    toast('投递清单读取失败：' + (e.message||e));
+  }
 }
 async function logEvent(jobId, type, note){
   await cloud.database.from('job_events').insert({ owner_name: session.user?.name ?? null, job_id: Number(jobId), event_type: type, note: note||null }).select();
@@ -947,9 +983,16 @@ async function authorize(id){
   }catch(e){ toast('授权失败：' + (e.message||e)); }
 }
 async function skipJob(id){
-  await cloud.database.from('jobs').update({ status:'不合适', updated_at:new Date().toISOString() }).eq('id', id).select();
-  await logEvent(id, '放弃投递', '你在确认清单中选择了不投递');
-  loadConfirm(); loadPool();
+  try{
+    requireSession();
+    const r = await cloud.database.from('jobs').update({ status:'不合适', updated_at:new Date().toISOString() }).eq('id', id).select();
+    // 旧版不校验返回行数：更新没命中（记录已被删/被并发改）时界面照样刷新，
+    // 岗位仍在列表里，用户会以为"点了不投没用"。现在必须校验。
+    if (!Array.isArray(r.data) || !r.data.length) return toast('操作失败：这条记录可能已被删除，状态未写入。请刷新后重试');
+    await logEvent(id, '放弃投递', '你在确认清单中选择了不投递');
+    toast('✕ 已移入「不投的岗位」，不会再出现在最新岗位清单');
+    loadConfirm(); loadPool();
+  }catch(e){ toast('操作失败：' + (e.message||e)); }
 }
 async function restoreJob(id){
   try{
