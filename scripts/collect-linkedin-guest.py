@@ -98,7 +98,8 @@ def probe(keyword, loc):
 
 # ---------- 失败词重采队列（2026-11-10）----------
 RETRY_COOLDOWN = 30 * 60          # 失败词冷却 30 分钟后才允许补采
-RETRY_PER_RUN = 1                 # 每轮最多补采 1 个失败词（+1 词 ≈ 50 条 / 40 秒）
+RETRY_PER_RUN = 2                 # 常规每轮补采 2 个失败词
+RETRY_BACKLOG_BOOST = 3           # 队列积压 ≥4 个词时，每轮补采 3 个（快速清积压）
 QUEUE_KEEP = 20                   # 队列只留最近 20 条，防止无限膨胀
 
 
@@ -130,12 +131,13 @@ def enqueue_failed(out, kws, reason):
 
 
 def pick_retry(out, now):
-    """取出冷却达标的失败词（每轮最多 RETRY_PER_RUN 个），并从队列移除"""
+    """取出冷却达标的失败词（常规 2 个，积压 ≥4 时 3 个），并从队列移除"""
     q = load_queue(out)
     ready = [e for e in q if now - e.get("ts", 0) >= RETRY_COOLDOWN]
     if not ready:
         return []
-    picked = [e["kw"] for e in ready[:RETRY_PER_RUN]]
+    n = RETRY_BACKLOG_BOOST if len(q) >= 4 else RETRY_PER_RUN
+    picked = [e["kw"] for e in ready[:n]]
     save_queue(out, [e for e in q if e["kw"] not in picked])
     return picked
 
@@ -147,8 +149,8 @@ def main():
     ap.add_argument("--out", default=".workbuddy/tmp")
     ap.add_argument("--location", default="Shanghai, China")
     ap.add_argument("--slug-prefix", default="li")
-    ap.add_argument("--max-kws", type=int, default=5,
-                    help="单轮词数上限（传入词全保留，失败词补采最多 RETRY_PER_RUN 个，超出截断）")
+    ap.add_argument("--max-kws", type=int, default=8,
+                    help="单轮词数上限（传入词优先保留，失败词补采最多 2-3 个，超出截断）")
     ap.add_argument("--no-retry-queue", action="store_true",
                     help="禁用失败词队列（测试/探针用）")
     args = ap.parse_args()

@@ -1195,6 +1195,26 @@ function finishOnb(){
 }
 
 /* 数据新鲜度条：读最近一次入库时间，超过 24 小时标红提示可能停摆（2026-11-09 新增） */
+let autoCollectTried = false;
+/* 自动补采：打开应用发现数据陈旧就自己排队，不再等用户发现/等定时器。
+   三道去抖：本次会话只试一次、localStorage 90 分钟内不重复、库里已有 pending 不重复。 */
+async function autoCollectIfStale(hrs){
+  const STALE_H = 8;
+  if (hrs <= STALE_H || autoCollectTried) return false;
+  autoCollectTried = true;
+  if (Date.now() - Number(localStorage.getItem('autoCollectAt') || 0) < 90 * 60 * 1000) return false;
+  localStorage.setItem('autoCollectAt', String(Date.now()));
+  try{
+    const { data: pend } = await cloud.database.from('agent_tasks').select('id').eq('type','collect_now').eq('status','pending').limit(1);
+    if (pend && pend.length) return false;
+    await cloud.database.from('agent_tasks').insert({
+      owner_name: (session && session.user && session.user.name) || null,
+      type: 'collect_now', status: 'pending',
+      note: '应用打开时检测到数据超过 8 小时未更新，自动排入补采'
+    }).select();
+    return true;
+  }catch(e){ return false; }
+}
 async function loadFreshness(){
   const bar = $('#freshBar');
   if(!bar) return;
@@ -1206,12 +1226,15 @@ async function loadFreshness(){
     const hrs = (Date.now() - last) / 3600000;
     const txt = hrs < 1 ? '刚更新' : hrs < 48 ? `${Math.round(hrs)} 小时前` : `${(hrs/24).toFixed(1)} 天前`;
     const stale = hrs > 24;
+    const queued = await autoCollectIfStale(hrs);
     bar.style.display = 'flex';
     bar.innerHTML = '<span>数据新鲜度</span>'
       + `<span class="pill ${stale ? 'warn' : 'ok'}">最近入库：${txt}</span>`
-      + (stale
-          ? '<span style="color:var(--warn)">· 采集可能已停摆（电脑睡眠/客户端未开），打开对话说一声即可补采</span>'
-          : '<span class="muted">· 每 2 小时自动采集</span>');
+      + (queued
+          ? '<span style="color:var(--warn)">· 已自动排入补采队列，Agent 下次触发时执行；着急可在下方点「⚡ 通知 Agent 立即采集」</span>'
+          : stale
+            ? '<span style="color:var(--warn)">· 采集可能已停摆（电脑睡眠/客户端未开），到「② 岗位池」点一下立即采集即可</span>'
+            : '<span class="muted">· 超过 8 小时未更新时打开本页会自动补采</span>');
   }catch(e){ bar.style.display = 'none'; }
 }
 
