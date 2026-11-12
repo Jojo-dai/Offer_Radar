@@ -1,0 +1,8 @@
+# 统一换行符：仓库内一律 LF，避免 Windows 上 checkout 出来的 .sh 在 Linux/macOS 或 CI 里跑不动，
+# 也让 diff 不被行尾差异污染（历史上两份前端 diff 全是 \r 噪音）。
+* text=auto eol=lf
+
+*.png binary
+*.jpg binary
+*.ico binary
+*.woff2 binary
