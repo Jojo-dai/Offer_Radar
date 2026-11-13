@@ -108,7 +108,10 @@ def tier(p, comp):
 def score_one(position, company=""):
     p = norm_position(position)
     s, w = tier(p, company)
-    if re.search(STRONG, p.lower()) and s < 70:
+    # 关键词保底只作用于「非硬冲突档」（55-69 分）。
+    # 旧写法 s < 70 会把校招/实习（25 分）、职能硬冲突（22-46 分）一并顶到 70，
+    # 导致 Intern 岗排进推荐前排（2026-11-13 实采发现：SAP 系升级项目实习生 被抬到 70）。
+    if re.search(STRONG, p.lower()) and 55 <= s < 70:
         s, w = 70, "SAP/预算/业财关键词命中，技能维度按强相关计"
     if re.search(r"资深|senior|高级|sr\.", p, re.I) and s >= 60:
         s += 4
