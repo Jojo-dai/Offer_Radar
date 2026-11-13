@@ -40,9 +40,23 @@ jobs:
         with:
           python-version: "3.11"
       - name: py_compile 全部脚本
-        run: python -m py_compile scripts/collect-linkedin-guest.py scripts/dump-existing.py scripts/score_jobs.py scripts/check-docs-links.py scripts/audit-decisions.py
+        run: python -m py_compile scripts/collect-linkedin-guest.py scripts/dump-existing.py scripts/score_jobs.py scripts/check-docs-links.py scripts/audit-decisions.py scripts/db_conn.py
       - name: 已决岗位判定规则自检（负向用例）
         run: python scripts/audit-decisions.py --self-test
+      - name: 审计脚本缺配置时必须给出指引（退出码 2，而不是 ModuleNotFoundError）
+        run: |
+          set +e
+          out=$(env -u DATABASE_URL -u WB_MCP_CONFIG -u OWNER_ID python scripts/audit-decisions.py 2>&1)
+          code=$?
+          echo "$out"
+          [ "$code" = "2" ] || { echo "期望退出码 2，实际 $code"; exit 1; }
+          echo "$out" | grep -q "DATABASE_URL" || { echo "缺少 DATABASE_URL 配置示例"; exit 1; }
+          echo "缺配置提示正常"
+      - name: 公共脚本不得硬编码具体账号
+        run: |
+          set -e
+          ! grep -q "wb:Cndyfv" scripts/audit-decisions.py scripts/db_conn.py
+          echo "无硬编码 owner_id"
       - name: 配置示例必须是合法 JSON
         run: python -c "import json; json.load(open('config/config.example.json', encoding='utf-8')); print('config.example.json OK')"
 
@@ -56,11 +70,13 @@ jobs:
           python-version: "3.11"
       - name: 相对链接可达性
         run: python scripts/check-docs-links.py
-      - name: README 必须包含最新防线章节与四条新增脚本说明
+      - name: README 必须包含最新防线章节与新增脚本说明
         run: |
           set -e
           grep -q "稳定性防线" README.md
           grep -q "11-guardrails.md" README.md
+          grep -q "12-decisions-patch.md" README.md
           grep -q "smoke-frontend.js" README.md
           grep -q "dump-existing.py" README.md
+          grep -q "audit-decisions.py" README.md
           echo "README 关键章节齐全"

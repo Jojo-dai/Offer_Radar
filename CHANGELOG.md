@@ -27,6 +27,17 @@
 - **修复** · 存量 61 条猎聘岗位的职位名残留「招聘」前缀（`招聘SAP MM实施顾问`），展示层已统一剥离。
   剥离只改展示串，归一化键不变，因此全状态查重结果不受影响（改后复检重复组仍为 0）。
 
+- **变更** · 审计脚本 `audit-decisions.py` 不再依赖开发机临时模块，连接方式与账号全部可配置。
+  原先它 `import dbq`（开发机 `.workbuddy/tmp/` 下的临时文件，**不在仓库里**），别人 clone 后必然
+  `ModuleNotFoundError`，等于这份审计能力无法交付；`owner_id` 也写死在源码里。
+  现在新增 `scripts/db_conn.py` 作为只读取数层：支持标准 PostgreSQL（`DATABASE_URL` + `psycopg2-binary`）
+  与 WorkBuddy 云库 MCP（`WB_MCP_CONFIG` + `WB_APP_ID`）两种后端；`owner_id` 走 `OWNER_ID` 或 `--owner`。
+  缺配置时打印可直接照抄的配置示例并返回退出码 2，不再是看不懂的导入报错。
+  CI 增加两条护栏：缺配置必须给出指引、公共脚本不得硬编码具体账号。
+- **文档** · 新增 [`docs/12-decisions-patch.md`](docs/12-decisions-patch.md)：改动清单、配置说明（含唯一需要
+  按城市调整的 `CITY_TAIL` 一行）、三种应用方式、验证命令、回滚步骤。README 同步修正
+  「建 3 个定时任务、设 8:00 / 18:00」的旧说法为「单个总调度 + 阈值分派」。
+
 ## 2026-11-12
 
 - **变更** · 调度改为**阈值分派**，不再依赖 8:00 / 18:00 整点。

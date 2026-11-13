@@ -11,21 +11,25 @@
 改其中任何一处，另一处必须同步，并跑 `node scripts/test-decisions.js`。
 
 用法：
-  python scripts/audit-decisions.py            # 有回流风险 → 退出码 1
-  python scripts/audit-decisions.py --json     # 机器可读
+  python scripts/audit-decisions.py                      # 有回流风险 → 退出码 1
+  python scripts/audit-decisions.py --json               # 机器可读
+  python scripts/audit-decisions.py --self-test          # 不连库，负向验证规则本身
+
+配置（二选一，详见 docs/12-decisions-patch.md 第 3 节）：
+  export DATABASE_URL='postgresql://…'   # 标准 PostgreSQL
+  export WB_MCP_CONFIG='<json>' && export WB_APP_ID='wbapp_xxx'   # WorkBuddy 云库
+  export OWNER_ID='wb:xxxx'              # 必填，或用 --owner 传入
+  export PENDING_STATUS='待确认'          # 可选，默认「待确认」
 """
 import argparse
 import json
+import os
 import re
 import sys
-from pathlib import Path
 
-WS = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(WS / ".workbuddy" / "tmp"))
-import dbq  # noqa: E402
+from db_conn import ConfigError, backend, fetch_rows, resolve_owner
 
-OWNER = "wb:Cndyfv_eOir07ck0FARtAjlvVeet"
-PENDING = "待确认"
+PENDING = os.environ.get("PENDING_STATUS", "待确认")
 
 PUNC = re.compile(r"[（）()【】\[\]{}<>·,，.。、/\\|\-—_~!！?？:：;；'\"“”‘’+*&#@]")
 NOISE = re.compile(r"招聘|诚聘|急招|热招|岗位名称|职位名称|岗位|职位")
@@ -65,15 +69,12 @@ def url_key(u):
     return re.sub(r"[?#].*$", "", str(u or "").strip()).rstrip("/").lower()
 
 
-def fetch_all():
+def fetch_all(owner):
     rows, last = [], 0
     while True:
-        chunk = dbq.sql(
+        chunk = fetch_rows(
             "SELECT id,company,position,status,source_url,created_at FROM jobs "
-            "WHERE owner_id='%s' AND id>%d ORDER BY id LIMIT 900" % (OWNER, last),
-            "read", as_json=True)
-        if isinstance(chunk, str):
-            raise SystemExit("查询失败：" + chunk[:300])
+            "WHERE owner_id='%s' AND id>%d ORDER BY id LIMIT 900" % (owner, last))
         if not chunk:
             break
         rows.extend(chunk)
@@ -83,10 +84,11 @@ def fetch_all():
     return rows
 
 
-def check(rows):
+def check(rows, pending_status=None):
     """返回 (待确认, 已决, 回流清单)，供真实审计与自检共用"""
-    decided = [r for r in rows if r["status"] != PENDING]
-    pending = [r for r in rows if r["status"] == PENDING]
+    pending_status = pending_status or PENDING
+    decided = [r for r in rows if r["status"] != pending_status]
+    pending = [r for r in rows if r["status"] == pending_status]
     s_keys = {strict_key(r) for r in decided}
     l_keys = {loose_key(r) for r in decided if loose_key(r)}
     u_keys = {url_key(r["source_url"]) for r in decided if url_key(r["source_url"])}
@@ -134,15 +136,25 @@ def self_test():
 
 
 def main():
-    ap = argparse.ArgumentParser()
+    global PENDING
+    ap = argparse.ArgumentParser(description="已决岗位回流审计（只读）")
     ap.add_argument("--json", action="store_true", help="输出 JSON")
     ap.add_argument("--self-test", action="store_true", help="不连库，用内存样本验证判定规则本身有效")
+    ap.add_argument("--owner", help="owner_id（默认取环境变量 OWNER_ID）")
+    ap.add_argument("--pending", help="待确认状态名（默认取环境变量 PENDING_STATUS，否则「待确认」）")
     a = ap.parse_args()
 
     if a.self_test:
         return self_test()
 
-    rows = fetch_all()
+    if a.pending:
+        PENDING = a.pending
+    try:
+        backend()                      # 先确认连接方式，缺什么先报什么
+        rows = fetch_all(resolve_owner(a.owner))
+    except ConfigError as e:
+        print("配置错误：%s" % e, file=sys.stderr)
+        return 2
     pending, decided, leaks = check(rows)
 
     if a.json:

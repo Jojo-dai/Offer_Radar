@@ -666,6 +666,9 @@ function urlKeyOf(u){ return String(u||'').trim().replace(/[?#].*$/,'').replace(
    为什么需要：同一岗位在不同平台/不同批次，标题常写成
    「FP&A Supervisor」「FP&A Supervisor (MJ003311)」「FP&A Supervisor（上海）」，
    严格键撞不上，副本就会漏进池子。宽松键只用于「隐藏」，不删除任何数据。 */
+/* ⚙️ 可配置项（换投递城市时只改这一行）：宽松键会把标题末尾的这些城市名/拼音剥掉，
+   再与已决岗位比对。表里没有的城市不会被剥离 → 带该城市后缀的副本可能漏进池子
+   （只会漏拦，不会误删、不会改状态）。增删城市后跑 node scripts/test-decisions.js 验证。 */
 const CITY_TAIL = /(上海|北京|深圳|广州|杭州|苏州|南京|成都|武汉|西安|天津|重庆|中国|china|shanghai|beijing|shenzhen|guangzhou|hangzhou|suzhou|nanjing|chengdu|wuhan)$/;
 function looseKey(j){
   const c = normTxt(j.company);

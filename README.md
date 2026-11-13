@@ -456,7 +456,7 @@ bash scripts/check-network.sh
 1. **建云应用**：在 WorkBuddy 里创建一个带云服务（数据库 + 免密钥 LLM + 用户认证）的应用，拿到 `applicationId`
 2. **建表**：把 [`scripts/schema.sql`](scripts/schema.sql) 在云数据库执行（含建表、GRANT、RLS 策略）
 3. **部署前端**：把 `app/index.html` 里的 `publicConfig` 三行换成你自己的（`endpoint` / `publishableKey` / `oauthRelayBaseUrl`），再作为静态站点发布。仓库里是占位符，不填跑不起来——这是刻意的，避免把别人的部署 key 带进你的环境
-4. **建 3 个定时任务**：把 [`docs/05-automations.md`](docs/05-automations.md) 里的三段 prompt 原样粘贴，时间分别设 08:00 / 18:00 / 每小时
+4. **建 1 个定时任务（总调度）**：把 [`docs/05-automations.md`](docs/05-automations.md) 里的总调度 prompt 原样粘贴，频率设「每 2 小时」。**不要**按 08:00 / 18:00 建三个——本机定时器依赖客户端在线，实测每天只落地 1–2 次，整点几乎从未成功；总调度内部按「白天 >8h / 夜间 >14h」阈值分派，任何一次触发都不空手而归
 5. **改配置**：把 [`config/config.example.json`](config/config.example.json) 里的占位（`applicationId`、`shareLink`、关键词默认值）替换成你自己的，并同步到 prompt 里
 6. **验网络**：跑 `bash scripts/check-network.sh`，接口能返回岗位卡片再启用领英部分
 7. **验链路**：把 `samples/demo-jobs.json` 粘贴进「智能导入」，应导入 6 条、0 条重复；再点「🧮 按画像批量打分」应出现分数
@@ -501,7 +501,8 @@ job-apply-agent/
 │   ├── 08-faq.md                 ← 排错与常见问题
 │   ├── 09-portability-auth.md    ← 跨 Agent 复现：身份与数据隔离
 │   ├── 10-collect-adapters.md    ← 换 Agent 环境的采集通道适配（三层互备）
-│   ├── 11-guardrails.md          ← 事故台账：15 类历史故障的根因/防线/验证方法
+│   ├── 11-guardrails.md          ← 事故台账：16 类历史故障的根因/防线/验证方法
+│   ├── 12-decisions-patch.md     ← 已决岗位回池补丁：改动清单 / 配置说明 / 回滚
 │   ├── assets/
 │   │   ├── architecture.svg      ← 整体架构图（README 首图）
 │   │   ├── workflow.svg          ← 七步工作流图
@@ -528,7 +529,7 @@ job-apply-agent/
 
 ## 稳定性防线：出过的问题不会再犯
 
-这个项目跑在自己的电脑上，没有运维兜底，所以每一类故障都必须变成**结构上不可能复发**的机制，而不是"下次注意"。完整台账（15 条，含根因、防线、验证方法）见 [`docs/11-guardrails.md`](docs/11-guardrails.md)，这里只列最关键的几条：
+这个项目跑在自己的电脑上，没有运维兜底，所以每一类故障都必须变成**结构上不可能复发**的机制，而不是"下次注意"。完整台账（16 条，含根因、防线、验证方法）见 [`docs/11-guardrails.md`](docs/11-guardrails.md)，这里只列最关键的几条：
 
 | 曾经出过的事 | 现在的防线 |
 |---|---|
@@ -538,13 +539,24 @@ job-apply-agent/
 | 领英整天 0 条 | 门禁只看接口实测（返回卡片即采），严禁凭出口 IP 判 CN 就跳过 |
 | 429 整词丢失（约 50 条/次） | 冷却重试 + 失败词重采队列，下轮自动补采 |
 | 点过"不投"的岗位又回池子 | 去重只在同状态内合并；列表渲染前后各过一遍白名单；写状态校验命中行数 |
+| 同岗位换个标题写法（`(MJ003311)`、`（上海）`）又回池子 | **已决岗位指纹**：严格键 + 宽松键 + 链接归一，渲染前过滤副本；只隐藏不删数据，撤销即回池（[补丁与配置说明](docs/12-decisions-patch.md)） |
 | 前端发布后整站按钮失效 | `scripts/smoke-frontend.js` 真正执行一遍内联脚本，CI 里强制跑 |
 
 **三道元防线**（防止修复本身退化）：
 
-1. **每轮采集收尾六项自检**——入库数、领英未静默跳过、游标推进、登记收尾、打分完成、状态一致性三条 SQL；任何一项不过必须写进运行记录。
+1. **每轮采集收尾七项自检**——入库数、领英未静默跳过、游标推进、登记收尾、打分完成、状态一致性三条 SQL、已决岗位零回流；任何一项不过必须写进运行记录。
 2. **改动纪律**——查重逻辑一字不动、打分只许改 `score_jobs.py`、全量读取必须走分页、前端改动必须过冒烟测试。
-3. **CI 红叉即阻断**——`.github/workflows/ci.yml` 跑前端冒烟 + Python 语法 + 文档相对链接检查，推上去就验证。
+3. **CI 红叉即阻断**——`.github/workflows/ci.yml` 跑前端冒烟 + 判定规则回归 + Python 语法 + 文档相对链接检查，推上去就验证。
+
+**可以随时自查的三条命令**（全部只读，不删不改）：
+
+| 想确认什么 | 命令 |
+|---|---|
+| 池子里有没有我决定过的岗位副本 | `python scripts/audit-decisions.py` |
+| 判定规则本身没写错 | `node scripts/test-decisions.js app/index.html` |
+| 前端脚本能跑起来 | `node scripts/smoke-frontend.js app/index.html` |
+
+审计脚本要连你自己的库，连接方式与 `owner_id` 的取法见 [docs/12-decisions-patch.md](docs/12-decisions-patch.md) 第 3.3 节。
 
 ---
 
