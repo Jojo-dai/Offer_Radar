@@ -656,6 +656,34 @@ function normTxt(s){
     .toLowerCase();
 }
 function dupKey(j){ return normTxt(j.company) + '|' + normTxt(j.position); }
+/* ===== 已决岗位指纹（2026-11-13）
+   规则：你点过「不投 / 授权投递 / 已投递 / 面试中」的岗位 = 终态决定。
+   采集回来的同岗位副本，哪怕标题多了括号编号、城市后缀，导致归一化键没撞上，
+   也不允许再出现在「岗位池」和「待确认」里 —— 这里做最后一道兜底。
+   注意：只做「不显示」，不删除、不改状态；撤销决定后该岗位会自动回到池子。 */
+function urlKeyOf(u){ return String(u||'').trim().replace(/[?#].*$/,'').replace(/\/+$/,'').toLowerCase(); }
+/* 宽松键：归一化后，再去掉「编号」和「末尾城市」这两类平台噪音。
+   为什么需要：同一岗位在不同平台/不同批次，标题常写成
+   「FP&A Supervisor」「FP&A Supervisor (MJ003311)」「FP&A Supervisor（上海）」，
+   严格键撞不上，副本就会漏进池子。宽松键只用于「隐藏」，不删除任何数据。 */
+const CITY_TAIL = /(上海|北京|深圳|广州|杭州|苏州|南京|成都|武汉|西安|天津|重庆|中国|china|shanghai|beijing|shenzhen|guangzhou|hangzhou|suzhou|nanjing|chengdu|wuhan)$/;
+function looseKey(j){
+  const c = normTxt(j.company);
+  let p = normTxt(j.position).replace(/mj\d+/g, '').replace(/\d{4,}/g, '');
+  for (let prev = null; p !== prev;){ prev = p; p = p.replace(CITY_TAIL, ''); }
+  if (!c && !p) return '\u0000' + Math.random();   // 双空不得互相匹配
+  return c + '|' + p;
+}
+function decidedIndex(all){
+  const jobs = (all||[]).filter(j => j.status && j.status !== '待确认');
+  const keys = new Set(jobs.map(dupKey));
+  const loose = new Set(jobs.map(looseKey));
+  const urls = new Set(jobs.map(j => urlKeyOf(j.source_url)).filter(Boolean));
+  return {
+    has(j){ return keys.has(dupKey(j)) || loose.has(looseKey(j)) || (!!j.source_url && urls.has(urlKeyOf(j.source_url))); },
+    size: jobs.length
+  };
+}
 /* 全量取 jobs：按 id 键集分页（每页 900），池子再大也不会被 limit 截断。
    与后端 dump-existing.py 同一套思路——云库单次查询有行数上限，靠分页绕开。 */
 async function fetchAllJobs(cols = '*'){
@@ -1030,7 +1058,12 @@ async function loadPool(){
     const data = await fetchAllJobs();
     // 铁律：岗位池只允许出现「待确认」。已投递 / 待投递 / 不合适 / 已拒绝 一律不显示。
     // 这里在去重之后再兜一次白名单，任何上游脏数据（历史遗留状态、并发写入）都进不来。
-    const rawPool = (data||[]).filter(j => j.status === '待确认');
+    // 2026-11-13 再加一道：凡是你已经点过决定（不投/授权投递/已投递）的岗位，
+    // 后续采集回来的同名或同链接副本一律不进池子（只隐藏，不删数据、不改状态）。
+    const decided = decidedIndex(data);
+    const pendAllRaw = (data||[]).filter(j => j.status === '待确认');
+    const coveredN = pendAllRaw.filter(j => decided.has(j)).length;
+    const rawPool = pendAllRaw.filter(j => !decided.has(j));
     const { list: pool, hidden } = dedupeList(rawPool);
     const allPool = pool.filter(j => j.status === '待确认');
     const filtered = applyFilters(allPool, LIST.pool);
@@ -1039,7 +1072,8 @@ async function loadPool(){
     const shown = sortedPool.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
     $('#poolCount').innerHTML = `（待确认 ${allPool.length} 个`
       + (filtered.length !== allPool.length ? `，筛选后 <b>${filtered.length}</b>` : '')
-      + `）` + (hidden ? ` <span class="muted">· 已折叠 ${hidden} 条重复</span>` : '');
+      + `）` + (hidden ? ` <span class="muted">· 已折叠 ${hidden} 条重复</span>` : '')
+      + (coveredN ? ` <span class="muted">· 已隐藏 ${coveredN} 条与你已有决定重复</span>` : '');
     $('#poolList').innerHTML = (shown.length
       ? shown.map(jobCard).join('')
       : `<div class="empty">${allPool.length ? '当前筛选条件下没有岗位，换个条件试试' : '岗位池为空，先去粘贴几个猎聘职位描述吧 👆'}</div>`)
@@ -1079,7 +1113,9 @@ async function loadConfirm(){
     // 现改为：全量分页取 → 按状态分组 → 组内 48h 新增置顶，再按匹配度排。
     const data = await fetchAllJobs();
     const all = data||[];
-    const pendingAll = dedupeList(all.filter(j=>j.status==='待确认')).list.filter(j=>j.status==='待确认');
+    // 2026-11-13：与岗位池同一口径——已决岗位（不投/授权投递/已投递）的同名副本不进待确认列表
+    const decidedC = decidedIndex(all);
+    const pendingAll = dedupeList(all.filter(j=>j.status==='待确认' && !decidedC.has(j))).list.filter(j=>j.status==='待确认');
     const pendingSorted = sortFreshFirst(applyFilters(pendingAll, LIST.confirm));
     const cPage = clampPage(LIST.confirm, pendingSorted.length);
     const pending = pendingSorted.slice((cPage - 1) * PAGE_SIZE, cPage * PAGE_SIZE);

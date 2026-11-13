@@ -1,9 +1,10 @@
 name: CI
 
-# 这个仓库是单文件应用 + 单文件脚本，没有构建步骤，所以 CI 只做三件"能被自动化抓住"的事：
+# 这个仓库是单文件应用 + 单文件脚本，没有构建步骤，所以 CI 只做四件"能被自动化抓住"的事：
 #   1) 前端内联脚本真的能跑起来（语法合法 != 能跑，TDZ/引用错误会让整站按钮失效而发布流程显示成功）
-#   2) Python 脚本语法可编译
-#   3) 文档相对链接不断（说明书点进去 404 比代码报错更隐蔽）
+#   2) 「已决岗位不回池」的判定逻辑符合预期（点过不投/授权投递的岗位，采集副本不得再进池）
+#   3) Python 脚本语法可编译
+#   4) 文档相对链接不断（说明书点进去 404 比代码报错更隐蔽）
 # 任何一项失败都会红叉，阻断"看起来发布成功"的错觉。
 
 on:
@@ -27,6 +28,8 @@ jobs:
           node-version: "20"
       - name: 执行 app/index.html 内联脚本
         run: node scripts/smoke-frontend.js app/index.html
+      - name: 「已决岗位不回池」逻辑回归
+        run: node scripts/test-decisions.js app/index.html
 
   python-syntax:
     name: Python 语法
@@ -37,7 +40,9 @@ jobs:
         with:
           python-version: "3.11"
       - name: py_compile 全部脚本
-        run: python -m py_compile scripts/collect-linkedin-guest.py scripts/dump-existing.py scripts/score_jobs.py scripts/check-docs-links.py
+        run: python -m py_compile scripts/collect-linkedin-guest.py scripts/dump-existing.py scripts/score_jobs.py scripts/check-docs-links.py scripts/audit-decisions.py
+      - name: 已决岗位判定规则自检（负向用例）
+        run: python scripts/audit-decisions.py --self-test
       - name: 配置示例必须是合法 JSON
         run: python -c "import json; json.load(open('config/config.example.json', encoding='utf-8')); print('config.example.json OK')"
 
