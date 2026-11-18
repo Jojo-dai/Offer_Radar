@@ -489,7 +489,8 @@ job-apply-agent/
 ├── LICENSE                       ← MIT
 ├── .github/workflows/ci.yml      ← CI：前端冒烟 + Python 语法 + 文档链接
 ├── app/
-│   └── index.html                ← 单文件应用（画像/岗位池/清单/看板）
+│   ├── index.html                ← 单文件应用（画像/岗位池/清单/看板）
+│   └── vendor/                   ← 本地化云 SDK / 文档解析 / OCR 资源（运行时零外链）
 ├── docs/
 │   ├── 01-workflow.md            ← 七步工作流详解（含数据流与时序）
 │   ├── 02-boundaries.md          ← 工作边界（不代投/只读/合规）
@@ -518,7 +519,10 @@ job-apply-agent/
 │   ├── score_jobs.py             ← 唯一权威打分器（JEV + keywordBoost，剥离"招聘"前缀）
 │   ├── dump-existing.py          ← 存量导出（id 键集分页，绕开云库 1000 行上限）
 │   ├── check-network.sh          ← 领英接口可达性自检（返回卡片数 > 0 即放行）
-│   └── smoke-frontend.js         ← 前端冒烟测试（Proxy 伪造 DOM，捕获 TDZ/引用错误）
+│   ├── smoke-frontend.js         ← 前端冒烟测试（Proxy 伪造 DOM，捕获 TDZ/引用错误）
+│   ├── health_check.py           ← 一键体检：外链 / 资源 / 冒烟 / 决策 / 档案库
+│   ├── archive_upload.py         ← 上传原件本地只读归档（按账号隔离，目录不入库）
+│   └── scope_owner.py            ← 给云库调用补 owner_id 的改写器
 ├── config/
 │   └── config.example.json       ← 需要替换的占位配置
 └── samples/
@@ -529,7 +533,7 @@ job-apply-agent/
 
 ## 稳定性防线：出过的问题不会再犯
 
-这个项目跑在自己的电脑上，没有运维兜底，所以每一类故障都必须变成**结构上不可能复发**的机制，而不是"下次注意"。完整台账（16 条，含根因、防线、验证方法）见 [`docs/11-guardrails.md`](docs/11-guardrails.md)，这里只列最关键的几条：
+这个项目跑在自己的电脑上，没有运维兜底，所以每一类故障都必须变成**结构上不可能复发**的机制，而不是"下次注意"。完整台账（18 条，含根因、防线、验证方法）见 [`docs/11-guardrails.md`](docs/11-guardrails.md)，这里只列最关键的几条：
 
 | 曾经出过的事 | 现在的防线 |
 |---|---|
@@ -541,6 +545,9 @@ job-apply-agent/
 | 点过"不投"的岗位又回池子 | 去重只在同状态内合并；列表渲染前后各过一遍白名单；写状态校验命中行数 |
 | 同岗位换个标题写法（`(MJ003311)`、`（上海）`）又回池子 | **已决岗位指纹**：严格键 + 宽松键 + 链接归一，渲染前过滤副本；只隐藏不删数据，撤销即回池（[补丁与配置说明](docs/12-decisions-patch.md)） |
 | 前端发布后整站按钮失效 | `scripts/smoke-frontend.js` 真正执行一遍内联脚本，CI 里强制跑 |
+| 公网 CDN 抖动 / 证书失败导致整页按钮失效 | 云 SDK、文档解析库、OCR 语言包全部本地 `app/vendor/`，运行时零外链；`python scripts/health_check.py` 全 PASS 才发布 |
+| 多账号数据串库 | 前端每条 DB 调用显式 `owner_id`，云端 RLS `owner_id = auth.uid()`；体检脚本核对隔离助手存在 |
+| 上传的简历原件丢失或被覆盖 | `scripts/archive_upload.py` 复制入库、sha256 去重、只读、按账号隔离；`uploads/` 已 gitignore，永不入库 |
 
 **三道元防线**（防止修复本身退化）：
 
@@ -555,6 +562,7 @@ job-apply-agent/
 | 池子里有没有我决定过的岗位副本 | `python scripts/audit-decisions.py` |
 | 判定规则本身没写错 | `node scripts/test-decisions.js app/index.html` |
 | 前端脚本能跑起来 | `node scripts/smoke-frontend.js app/index.html` |
+| 全链路是否正常（外链 / 资源 / 测试 / 档案库） | `python scripts/health_check.py` |
 
 审计脚本要连你自己的库，连接方式与 `owner_id` 的取法见 [docs/12-decisions-patch.md](docs/12-decisions-patch.md) 第 3.3 节。
 

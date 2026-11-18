@@ -7,6 +7,18 @@
 
 ---
 
+## 2026-11-18
+
+- **修复** · 应用"打开但按钮没反应"——运行时依赖公网 CDN 的云 SDK 与解析库，实测加载 9–18 秒甚至 TLS 失败。
+  云 SDK、mammoth、pdf.js、Tesseract 及中文语言包全部下载到 `app/vendor/` 并改用相对路径；加 SDK 失败横幅与 15 秒加载超时。
+  顺带修掉隐藏 Bug：原 OCR `langPath` 指向不存在的 `@tesseract.js-data/chi_sim@4.0.0_fast_int`（404），现指向本地语言包。
+- **变更** · 账号隔离从"只靠 RLS"升级为纵深防御：前端 35 处云库调用全部补 `owner_id` 条件（查询/更新/删除 `.eq()`，写入显式字段），
+  总调度所有状态判断 SQL 也加账号条件；`scripts/scope_owner.py` 固化为改写器。
+- **新增** · 上传原件本地档案库：`scripts/archive_upload.py` 复制原件（不移动、不删改）到 `uploads/by-account/<owner>/`，
+  sha256 去重、入库即只读、按账号隔离，`uploads/index.html` 随时筛选展示。`uploads/` 已 gitignore，**个人简历永不进仓库**。
+- **新增** · `scripts/health_check.py` 一键体检：外链残留、资源齐全、JS 语法、前端冒烟、9 个决策用例、档案完整性一次跑完；
+  已接入总调度看门狗前置体检，并把命令写进 `docs/11-guardrails.md` 与 README。
+
 ## 2026-11-13
 
 - **修复** · **已点「不投 / 授权投递」的岗位，手动采集后又回到岗位池**（第二轮加固）。

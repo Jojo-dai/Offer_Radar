@@ -31,3 +31,6 @@ Thumbs.db
 .vscode/
 .idea/
 *.log
+
+# 本地上传档案库（个人简历原件，绝不提交）
+uploads/

@@ -23,6 +23,8 @@
 | 15 | 前端改完发布后整页按钮全失效 | 把 `bindListFilters()` 的调用放在 `const LIST` 声明之前（TDZ），语法合法、`node --check` 与 `new Function()` 都过，但浏览器加载即抛 ReferenceError，脚本中断 | 新增 `scripts/smoke-frontend.js`：用 Proxy 伪造 DOM/云 SDK 真正执行一遍内联脚本，任何顶层异常都让退出码为 1；发布前必须跑 | `node scripts/smoke-frontend.js ../job-agent/index.html app/index.html` 退出码 = 0 |
 | 12 | 11-12 白天整日无采集、手动请求卡 pending 48 分钟 | 定时任务依赖客户端在线，实际每天只落地 1–2 次，8/18 点整点采集几乎从未成功；漏掉的触发不会回溯 | ① 调度阈值化：白天距上次入库 >8 小时即采（P1），不再等整点；夜间 >14 小时仍强制补采（P1b）；② **前端自动补采**：打开应用发现数据 >8 小时陈旧，自动写 collect_now（90 分钟去抖 + 已有 pending 不重复）；③ 调度铁律 8 明确自动补采请求按 P0 执行；④ pending 不允许跨轮滞留超 2 小时 | 打开应用看新鲜度条：>8 小时应出现「已自动排入补采队列」提示；`agent_tasks` 中不应出现 pending 超过 2 小时 |
 
+| 17 | **打开应用卡在登录页、按钮无响应（2026-11-18）** | 页面强依赖 jsDelivr 上的云 SDK，实测加载 9~18 秒甚至 TLS 握手失败；脚本没就绪时整页无功能，看起来像"打不开" | SDK 已下载到 `job-agent/vendor/workbuddy-cloud-sdk.global.js`，页面改成本地相对路径；其余静态依赖（mammoth / pdf.js / tesseract / 语言包）同样必须本地化，禁止运行时才从公网拉 | `job-agent/vendor/` 下 SDK 存在且 `index.html` 第 321 行指向本地；冒烟测试 0 退出；断网后页面仍能渲染并给出明确错误提示 |
+| 18 | **多账号数据可能串库（2026-11-18 加固）** | 前端 36 处云库调用全部只靠 RLS 隐式隔离，没有显式 owner_id；自动化判断数据新鲜度的 B/C 查询也没有 owner 条件 | ① 前端所有 DB 调用显式带 `owner_id = MY_OWNER()`（insert 写入、select/update/delete 追加 eq）；② 自动化第 0 步先读 OWNER_ID，A/B/C 与铁律 3 强制所有 SQL 带 owner_id；③ 轮末自检 SQL 也带 owner 条件 | `node scripts/smoke-frontend.js` + `node scripts/test-decisions.js` 全绿；`grep "cloud.database.from" index.html` 每条都含 owner_id；库中 owner_id 只有当前账号 |
 | 16 | **手动采集后，已点「不投 / 授权投递」的岗位又回到岗位池（2026-11-13 加固）** | 上一轮只修了「去重误删」和「采集前查重」，但漏判仍会发生：同一岗位在不同平台/不同批次的标题差一个括号编号（`(MJ003311)`）或城市后缀（`（上海）`），归一化键撞不上，采集就会写进一条新的「待确认」；而 `loadPool` 只按 status 过滤、不做跨状态比对，副本照常显示 | ① 前端新增**已决岗位指纹** `decidedIndex()`：严格键 + 宽松键（去编号、去末尾城市）+ 链接归一，岗位池与待确认列表渲染前过滤已决岗位的副本——**只隐藏、不删数据、不改状态**，撤销决定后自动回池；② 池子计数显式标出「已隐藏 N 条与你已有决定重复」；③ 新增 `scripts/test-decisions.js`（9 个场景）并接入 CI；④ 采集侧的全状态查重与 URL 兜底保持原样（查重规则未动） | `node scripts/test-decisions.js app/index.html` 全绿；把一条「不合适」岗位用同名、带 `(MJ编号)` 的新卡片重采一遍，岗位池计数应出现「已隐藏 1 条」，且该岗位仍留在「不投」清单里 |
 
 ## 二、调度可靠性的真相（必须知道）
@@ -46,8 +48,8 @@
 5. **打分完成**：新入库岗位全部有 match_score，或 note 注明为什么没打。
 6. **状态一致性**（2026-11-12 新增）：跑一次等价于前端「🩺 数据自检」的三条 SQL，任何一条非空都要写进 note：
    - 重复：`SELECT company, position, count(*) FROM jobs WHERE owner_id='<uid>' GROUP BY 1,2 HAVING count(*)>1`
-   - 标记丢失：`SELECT j.id FROM job_events e JOIN jobs j ON j.id=e.job_id WHERE e.event_type IN ('放弃投递','已投递','授权投递') AND j.status='待确认'`
-   - 异常状态：`SELECT DISTINCT status FROM jobs WHERE status NOT IN ('待确认','待投递','已投递','已查看','已回复','面试邀请','不合适','已拒绝')`
+   - 标记丢失：`SELECT j.id FROM job_events e JOIN jobs j ON j.id=e.job_id WHERE e.owner_id='<uid>' AND e.event_type IN ('放弃投递','已投递','授权投递') AND j.status='待确认'`
+   - 异常状态：`SELECT DISTINCT status FROM jobs WHERE owner_id='<uid>' AND status NOT IN ('待确认','待投递','已投递','已查看','已回复','面试邀请','不合适','已拒绝')`
 7. **已决岗位没有回流**（2026-11-13）：`python scripts/audit-decisions.py`，退出码必须为 0（该脚本只读，不删不改）。
    非 0 说明岗位池里存在你点过「不投 / 授权投递」却仍是「待确认」的副本，按清单逐条核对后处理。
    判定规则与前端 `decidedIndex()` 同源，改动任一侧都要同步跑 `node scripts/test-decisions.js` 与 `python scripts/audit-decisions.py --self-test`。
@@ -63,8 +65,11 @@
 - **列表只显示白名单状态**：岗位池只允许「待确认」，最新岗位清单只允许「待确认」，已确认投递只允许「待投递」。新增任何列表都要显式过滤，禁止"全量渲染再靠角标区分"。
 - **写状态必须校验命中行数**：`update(...).eq('id',id).select()` 之后必须检查 `data.length`，为 0 就明确报错，不允许"静默刷新界面"。
 - **异常不许静默**：列表加载的 `catch` 里必须给出可见提示，不能让旧 DOM 冒充当前数据。
+- **静态依赖必须本地化**（2026-11-18）：云 SDK、解析库、OCR 语言包一律放 `app/vendor/` 并用相对路径引用，禁止页面运行时从公网 CDN 拉取——公网抖动会直接让整页按钮失效。新增依赖同理。发布前和看门狗每轮必须跑 `python scripts/health_check.py`，全部 PASS 才算通过；该脚本会同时核验本地资源、外链残留、冒烟测试、决策用例和上传档案库完整性。
+- **上传原件只进本地只读档案库**（2026-11-18）：用户上传/提供的简历原件用 `scripts/archive_upload.py add` 复制进仓库根目录下 `uploads/by-account/<owner>/`（已 gitignore，**永不入库**），按 sha256 去重、入库即只读、绝不覆盖或移动源文件；`uploads/index.html` 是按账号过滤的展示入口。云库只保留脱敏文本，不再新增原件上传链路。
+- **前端 DB 调用必须显式 owner_id**（2026-11-18）：RLS 是最后一道防线，不是唯一防线。每条 `cloud.database.from(...)` 查询/更新/删除都要 `.eq('owner_id', MY_OWNER())`，insert 要写 `owner_id: MY_OWNER()`；改完用 `python scripts/scope_owner.py <src> <dst>` 逐条核对。
 - **列表必须分页 + 白名单**（2026-11-12）：任何岗位列表每页 ≤30 条并带筛选（平台/匹配度/新鲜度），禁止一次性渲染上千张卡片；列表只显示白名单状态。
 - **文档与实跑必须同步**（2026-11-12）：改了调度/上限/流程，同一提交里必须改 README、AGENTS 与对应 docs。历史教训：调度早已改成"总调度 + 阈值分派"，文档却还写着"三个定时任务 8:00/18:00"，复刻的人照文档做就会复现"整天不采"。
-- **前端改动必须过冒烟测试**（2026-11-12）：发布前跑 `node scripts/smoke-frontend.js ../job-agent/index.html app/index.html`，退出码必须为 0。
+- **前端改动必须过冒烟测试**（2026-11-12）：发布前跑 `node scripts/smoke-frontend.js app/index.html`，退出码必须为 0。
   `node --check` / `new Function(code)` 只验语法，查不出运行期引用错误。真实事故：把 `bindListFilters(...)` 写在 `const LIST` 之前，语法合法但浏览器一加载就抛
   `ReferenceError: Cannot access 'LIST' before initialization`，整段脚本中断、全站按钮失效，而发布流程毫无异常提示。

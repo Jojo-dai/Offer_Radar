@@ -318,8 +318,17 @@
 
 <div class="toast" id="toast"></div>
 
-<script src="https://cdn.jsdelivr.net/npm/@tencent-ai/workbuddy-cloud-sdk@dev/lib/index.global.js"></script>
+<script src="./vendor/workbuddy-cloud-sdk.global.js"></script>
 <script>
+if (!window.WorkBuddyCloud) {
+  document.addEventListener('DOMContentLoaded', () => {
+    const b = document.createElement('div');
+    b.style.cssText = 'position:fixed;z-index:9999;top:0;left:0;right:0;padding:12px 18px;background:#fee2e2;color:#991b1b;border-bottom:1px solid #fecaca;font:14px/1.5 system-ui;text-align:center';
+    b.textContent = '云 SDK 加载失败：应用资源不完整，请刷新页面或联系维护者重新发布。';
+    document.body.prepend(b);
+  });
+  throw new Error('云 SDK 加载失败');
+}
 /* ===== 云服务初始化（publicConfig 由云端环境注入）===== */
 const publicConfig = {
   endpoint: 'https://<your-app>.app.workbuddy.host',
@@ -336,6 +345,7 @@ const $ = (s) => document.querySelector(s);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const STATUSES = ['待确认','待投递','已投递','已查看','已回复','面试邀请','不合适','已拒绝'];
 let session = null, modelId = null, autoTimer = null, countdownInt = null, freshTimer = null, nextRefreshAt = 0, curProfileId = null;
+const MY_OWNER = () => (session && session.user && session.user.id) || '';
 
 function toast(msg, ms = 2600){ const t = $('#toast'); t.textContent = msg; t.classList.add('show'); clearTimeout(t._h); t._h = setTimeout(()=>t.classList.remove('show'), ms); }
 function hint(id, msg, loading){ $(id).innerHTML = (loading ? '<span class="spin"></span>' : '') + esc(msg); }
@@ -468,8 +478,12 @@ function scrubPII(t){
 function loadScript(src){
   return new Promise((res, rej) => {
     const s = document.createElement('script');
-    s.src = src; s.onload = res;
-    s.onerror = () => rej(new Error('解析组件加载失败，请检查网络后重试'));
+    let done = false;
+    const finish = (fn, val) => { if (done) return; done = true; clearTimeout(timer); fn(val); };
+    const timer = setTimeout(() => finish(rej, new Error('解析组件加载超时，请刷新页面后重试')), 15000);
+    s.src = src;
+    s.onload = () => finish(res);
+    s.onerror = () => finish(rej, new Error('解析组件加载失败，请确认应用资源完整后重试'));
     document.head.appendChild(s);
   });
 }
@@ -478,13 +492,13 @@ async function extractResumeText(f){
   if (/\.(txt|md|markdown)$/.test(name)) return await f.text();
   if (/\.doc$/.test(name)) throw new Error('旧版 .doc 无法在浏览器解析，请用 Word 另存为 .docx 后再上传');
   if (/\.docx$/.test(name)) {
-    if (!window.mammoth) await loadScript('https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.6.0/mammoth.browser.min.js');
+    if (!window.mammoth) await loadScript('./vendor/mammoth.browser.min.js');
     const r = await mammoth.extractRawText({ arrayBuffer: await f.arrayBuffer() });
     return r.value || '';
   }
   if (/\.pdf$/.test(name)) {
-    if (!window.pdfjsLib) await loadScript('https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js');
-    pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+    if (!window.pdfjsLib) await loadScript('./vendor/pdf.min.js');
+    pdfjsLib.GlobalWorkerOptions.workerSrc = './vendor/pdf.worker.min.js';
     const pdf = await pdfjsLib.getDocument({ data: await f.arrayBuffer() }).promise;
     let out = '';
     for (let i = 1; i <= pdf.numPages; i++) {
@@ -495,10 +509,12 @@ async function extractResumeText(f){
     return out;
   }
   if (/\.(jpg|jpeg|png|webp|bmp)$/.test(name)) {
-    if (!window.Tesseract) await loadScript('https://cdnjs.cloudflare.com/ajax/libs/tesseract.js/5.0.4/tesseract.min.js');
+    if (!window.Tesseract) await loadScript('./vendor/tesseract.min.js');
     toast('图片 OCR 识别中，中文简历约需 20-60 秒…');
     const { data } = await Tesseract.recognize(f, 'chi_sim', {
-      langPath: 'https://cdn.jsdelivr.net/npm/@tesseract.js-data/chi_sim@4.0.0_fast_int'
+      workerPath: './vendor/worker.min.js',
+      corePath: './vendor/core/tesseract-core-lstm.wasm.js',
+      langPath: './vendor/tessdata'
     });
     return data.text || '';
   }
@@ -530,7 +546,7 @@ $('#analyzeBtn').onclick = async () => {
       '我的简历如下：\n' + text.slice(0, 8000)
     );
     await cloud.database.from('profiles').update({ is_active: false }).eq('owner_id', session.user.id).select();
-    await cloud.database.from('profiles').insert({
+    await cloud.database.from('profiles').insert({ owner_id: MY_OWNER(),
       owner_name: session.user?.name ?? null,
       resume_filename: $('#resumeFile').files[0]?.name || null,
       resume_text: text.slice(0, 20000),
@@ -550,7 +566,7 @@ $('#analyzeBtn').onclick = async () => {
 async function loadProfileView(){
   try{
     requireSession();
-    const { data } = await cloud.database.from('profiles').select('*').eq('is_active', true).order('created_at', { ascending:false }).limit(1);
+    const { data } = await cloud.database.from('profiles').select('*').eq('is_active', true).order('created_at', { ascending:false }).limit(1).eq('owner_id', MY_OWNER());
     const box = $('#profileResult');
     if (!data || !data.length){ box.style.display = 'none'; return; }
     const p = data[0];
@@ -600,7 +616,7 @@ async function sendProfileChat(){
     requireSession();
     const text = $('#chatInput').value.trim();
     if (!text || !curProfileId) return;
-    const { data } = await cloud.database.from('profiles').select('*').eq('id', curProfileId).maybeSingle();
+    const { data } = await cloud.database.from('profiles').select('*').eq('id', curProfileId).eq('owner_id', MY_OWNER()).maybeSingle();
     if (!data) return toast('画像不存在，请先完成简历分析');
     const log = data.chat_log || [];
     log.push({ role:'user', content:text });
@@ -620,7 +636,7 @@ async function sendProfileChat(){
       keywords: r.keywords ?? data.keywords,
       keywords_en: r.keywords_en ?? data.keywords_en,
       greeting_template: r.greeting_template ?? data.greeting_template
-    }).eq('id', curProfileId).select();
+    }).eq('id', curProfileId).eq('owner_id', MY_OWNER()).select();
     $('#chatInput').value = '';
     toast('✅ 画像已按你的意见调整，请查看报告，满意后点「确认画像」');
     loadProfileView();
@@ -635,9 +651,9 @@ async function confirmProfile(){
   try{
     requireSession();
     if (!curProfileId) return;
-    const { data } = await cloud.database.from('profiles').select('confirmed').eq('id', curProfileId).maybeSingle();
+    const { data } = await cloud.database.from('profiles').select('confirmed').eq('id', curProfileId).eq('owner_id', MY_OWNER()).maybeSingle();
     const next = !(data && data.confirmed);
-    await cloud.database.from('profiles').update({ confirmed: next }).eq('id', curProfileId).select();
+    await cloud.database.from('profiles').update({ confirmed: next }).eq('id', curProfileId).eq('owner_id', MY_OWNER()).select();
     toast(next ? '✅ 画像已确认，解锁「② 岗位池」匹配打分' : '已取消确认，可继续对话调整');
     loadProfileView();
   }catch(e){ toast('操作失败：' + (e.message||e)); }
@@ -692,7 +708,7 @@ function decidedIndex(all){
 async function fetchAllJobs(cols = '*'){
   const all = []; let last = 0;
   for(;;){
-    const { data, error } = await cloud.database.from('jobs').select(cols).gt('id', last).order('id').limit(900);
+    const { data, error } = await cloud.database.from('jobs').select(cols).gt('id', last).order('id').limit(900).eq('owner_id', MY_OWNER());
     if (error) throw error;
     if (!data || !data.length) break;
     all.push(...data);
@@ -810,7 +826,7 @@ $('#smartImportBtn').onclick = async () => {
         if (seen.has(k) || (uk && seenUrl.has(uk))) { dup++; continue; }
         seen.add(k);
         if (uk) seenUrl.add(uk);
-        await cloud.database.from('jobs').insert({
+        await cloud.database.from('jobs').insert({ owner_id: MY_OWNER(),
           owner_name: session.user?.name ?? null,
           company, position,
           jd_summary: String(it.tags||it.desc||'').trim().slice(0,300) || '书签采集：详情见职位链接',
@@ -846,7 +862,7 @@ $('#smartImportBtn').onclick = async () => {
         if (seen2.has(k2) || (uk2 && seenUrl2.has(uk2))) { dup2++; continue; }
         seen2.add(k2);
         if (uk2) seenUrl2.add(uk2);
-        await cloud.database.from('jobs').insert({
+        await cloud.database.from('jobs').insert({ owner_id: MY_OWNER(),
           owner_name: session.user?.name ?? null,
           company: j.company, position: j.position,
           jd_summary: j.jd_summary, salary: j.salary, location: j.location,
@@ -886,12 +902,12 @@ $('#dedupeBtn').onclick = async () => {
       g.sort(bestFirst);
       const keep = g[0];
       for (const j of g.slice(1)){
-        const { data: evs } = await cloud.database.from('job_events').select('*').eq('job_id', j.id);
+        const { data: evs } = await cloud.database.from('job_events').select('*').eq('job_id', j.id).eq('owner_id', MY_OWNER());
         if (evs?.length){
-          await cloud.database.from('job_events').update({ job_id: keep.id }).eq('job_id', j.id).select();
+          await cloud.database.from('job_events').update({ job_id: keep.id }).eq('job_id', j.id).eq('owner_id', MY_OWNER()).select();
           moved += evs.length;
         }
-        await cloud.database.from('jobs').delete().eq('id', j.id).select();
+        await cloud.database.from('jobs').delete().eq('id', j.id).eq('owner_id', MY_OWNER()).select();
         removed++;
       }
     }
@@ -910,7 +926,7 @@ const EVENT_TO_STATUS = { '放弃投递': '不合适', '授权投递': '待投�
 async function fetchAllEvents(){
   const all = []; let last = 0;
   for(;;){
-    const { data, error } = await cloud.database.from('job_events').select('*').gt('id', last).order('id').limit(900);
+    const { data, error } = await cloud.database.from('job_events').select('*').gt('id', last).order('id').limit(900).eq('owner_id', MY_OWNER());
     if (error || !data || !data.length) break;
     all.push(...data);
     if (data.length < 900) break;
@@ -956,13 +972,13 @@ async function repairConsistency(r){
     for (const j of g.slice(1)){
       // 双保险：只删除"待确认"副本，任何带用户意图的记录都不动
       if (j.status !== '待确认') continue;
-      await cloud.database.from('job_events').update({ job_id: keep.id }).eq('job_id', j.id).select();
-      await cloud.database.from('jobs').delete().eq('id', j.id).select();
+      await cloud.database.from('job_events').update({ job_id: keep.id }).eq('job_id', j.id).eq('owner_id', MY_OWNER()).select();
+      await cloud.database.from('jobs').delete().eq('id', j.id).eq('owner_id', MY_OWNER()).select();
       fixed++;
     }
   }
   for (const it of r.lostMarks){
-    await cloud.database.from('jobs').update({ status: it.want, updated_at: new Date().toISOString() }).eq('id', it.job.id).select();
+    await cloud.database.from('jobs').update({ status: it.want, updated_at: new Date().toISOString() }).eq('id', it.job.id).eq('owner_id', MY_OWNER()).select();
     await logEvent(it.job.id, '自检修复', `状态与操作记录不一致，按最近一次操作恢复为「${it.want}」`);
     fixed++;
   }
@@ -984,9 +1000,9 @@ $('#auditBtn').onclick = async () => {
 $('#matchBtn').onclick = async () => {
   try{
     requireSession();
-    const { data: profs } = await cloud.database.from('profiles').select('*').eq('is_active', true).eq('confirmed', true).limit(1);
+    const { data: profs } = await cloud.database.from('profiles').select('*').eq('is_active', true).eq('confirmed', true).limit(1).eq('owner_id', MY_OWNER());
     if (!profs?.length) return toast('请先在「① 简历画像」多轮调整并点击「确认画像」后，再来打分');
-    const { data: pendRaw } = await cloud.database.from('jobs').select('*').eq('status','待确认').order('created_at',{ascending:false}).limit(200);
+    const { data: pendRaw } = await cloud.database.from('jobs').select('*').eq('status','待确认').order('created_at',{ascending:false}).limit(200).eq('owner_id', MY_OWNER());
     if (!pendRaw?.length) return toast('岗位池中没有待确认的岗位');
     const pend = dedupeList(pendRaw).list.slice(0,20); // 打分前先折叠重复，避免同一岗位重复消耗 tokens
     $('#matchBtn').disabled = true; hint('#poolHint','AI 正在按画像匹配打分…', true);
@@ -1000,7 +1016,7 @@ $('#matchBtn').onclick = async () => {
     for (const item of (r.results||[])){
       const job = pend[item.index - 1];
       if (!job || typeof item.score !== 'number') continue;
-      await cloud.database.from('jobs').update({ match_score: Math.max(0, Math.min(100, item.score)), match_reason: String(item.reason||'') }).eq('id', job.id).select();
+      await cloud.database.from('jobs').update({ match_score: Math.max(0, Math.min(100, item.score)), match_reason: String(item.reason||'') }).eq('id', job.id).eq('owner_id', MY_OWNER()).select();
     }
     toast('✅ 打分完成，按匹配度排序见下方列表');
     loadPool();
@@ -1014,7 +1030,7 @@ $('#collectLogBtn').onclick = async () => {
     requireSession();
     box.style.display = 'block';
     box.innerHTML = '<span class="muted">加载中…</span>';
-    const { data } = await cloud.database.from('agent_tasks').select('*').order('requested_at',{ascending:false}).limit(20);
+    const { data } = await cloud.database.from('agent_tasks').select('*').order('requested_at',{ascending:false}).limit(20).eq('owner_id', MY_OWNER());
     const rows = data || [];
     const stBadge = t => t.status === 'done'
       ? '<span style="background:#EAF3DE;color:#3B6D11;padding:2px 8px;border-radius:10px;font-size:12px">已完成</span>'
@@ -1044,7 +1060,7 @@ $('#triggerCollectBtn').onclick = async () => {
     requireSession();
     if (!curProfileId) return toast('请先完成①画像确认，Agent 才知道按什么关键词采集');
     $('#triggerCollectBtn').disabled = true; hint('#triggerHint','正在写入采集请求…', true);
-    await cloud.database.from('agent_tasks').insert({
+    await cloud.database.from('agent_tasks').insert({ owner_id: MY_OWNER(),
       owner_name: session.user?.name ?? null,
       type: 'collect_now', status: 'pending',
       note: '用户在应用中手动触发'
@@ -1102,8 +1118,8 @@ function jobCard(j){
 }
 async function delJob(id){
   if (!confirm('确定删除该岗位记录？')) return;
-  await cloud.database.from('jobs').delete().eq('id', id).select();
-  await cloud.database.from('job_events').delete().eq('job_id', id).select();
+  await cloud.database.from('jobs').delete().eq('id', id).eq('owner_id', MY_OWNER()).select();
+  await cloud.database.from('job_events').delete().eq('job_id', id).eq('owner_id', MY_OWNER()).select();
   loadPool(); loadConfirm();
 }
 
@@ -1174,12 +1190,12 @@ async function loadConfirm(){
   }
 }
 async function logEvent(jobId, type, note){
-  await cloud.database.from('job_events').insert({ owner_name: session.user?.name ?? null, job_id: Number(jobId), event_type: type, note: note||null }).select();
+  await cloud.database.from('job_events').insert({ owner_id: MY_OWNER(), owner_name: session.user?.name ?? null, job_id: Number(jobId), event_type: type, note: note||null }).select();
 }
 async function authorize(id){
   try{
     requireSession();
-    const r = await cloud.database.from('jobs').update({ status:'待投递', updated_at:new Date().toISOString() }).eq('id', id).select();
+    const r = await cloud.database.from('jobs').update({ status:'待投递', updated_at:new Date().toISOString() }).eq('id', id).eq('owner_id', MY_OWNER()).select();
     if (!Array.isArray(r.data) || !r.data.length) return toast('操作失败：该记录可能已被删除');
     const job = r.data[0];
     await logEvent(id, '授权投递', '你手动确认授权，简历将投递至该岗位');
@@ -1191,7 +1207,7 @@ async function authorize(id){
 async function skipJob(id){
   try{
     requireSession();
-    const r = await cloud.database.from('jobs').update({ status:'不合适', updated_at:new Date().toISOString() }).eq('id', id).select();
+    const r = await cloud.database.from('jobs').update({ status:'不合适', updated_at:new Date().toISOString() }).eq('id', id).eq('owner_id', MY_OWNER()).select();
     // 旧版不校验返回行数：更新没命中（记录已被删/被并发改）时界面照样刷新，
     // 岗位仍在列表里，用户会以为"点了不投没用"。现在必须校验。
     if (!Array.isArray(r.data) || !r.data.length) return toast('操作失败：这条记录可能已被删除，状态未写入。请刷新后重试');
@@ -1203,7 +1219,7 @@ async function skipJob(id){
 async function restoreJob(id){
   try{
     requireSession();
-    const r = await cloud.database.from('jobs').update({ status:'待确认', updated_at:new Date().toISOString() }).eq('id', id).select();
+    const r = await cloud.database.from('jobs').update({ status:'待确认', updated_at:new Date().toISOString() }).eq('id', id).eq('owner_id', MY_OWNER()).select();
     if (!Array.isArray(r.data) || !r.data.length) return toast('操作失败：该记录可能已被删除');
     await logEvent(id, '恢复待确认', '你从不投清单将岗位移回待确认');
     toast('↩ 已移回「最新岗位清单」');
@@ -1213,7 +1229,7 @@ async function restoreJob(id){
 async function markSent(id){
   try{
     requireSession();
-    const r = await cloud.database.from('jobs').update({ status:'已投递', updated_at:new Date().toISOString() }).eq('id', id).select();
+    const r = await cloud.database.from('jobs').update({ status:'已投递', updated_at:new Date().toISOString() }).eq('id', id).eq('owner_id', MY_OWNER()).select();
     if (!Array.isArray(r.data) || !r.data.length) return toast('操作失败');
     await logEvent(id, '已投递', '你在猎聘上手动完成投递，开始跟踪');
     toast('📮 已记录投递，可在「④ 跟踪仪表盘」查看进展');
@@ -1235,12 +1251,12 @@ $('#authBatchBtn').onclick = async () => {
 $('#sentBatchBtn').onclick = async () => {
   try{
     requireSession();
-    const { data } = await cloud.database.from('jobs').select('*').eq('status','待投递');
+    const { data } = await cloud.database.from('jobs').select('*').eq('status','待投递').eq('owner_id', MY_OWNER());
     const ready = (data||[]);
     if (!ready.length) return toast('没有待投递的岗位');
     if (!confirm(`确认你已在对应平台（猎聘/领英）手动投递了全部 ${ready.length} 个待投递岗位？`)) return;
     for (const j of ready){
-      await cloud.database.from('jobs').update({ status:'已投递', updated_at:new Date().toISOString() }).eq('id', j.id).select();
+      await cloud.database.from('jobs').update({ status:'已投递', updated_at:new Date().toISOString() }).eq('id', j.id).eq('owner_id', MY_OWNER()).select();
       await logEvent(j.id, '已投递', '批量确认已在猎聘完成投递');
     }
     toast('📮 已批量记录投递'); loadConfirm(); loadPool();
@@ -1283,7 +1299,7 @@ async function loadDashboard(){
   try{
     requireSession();
     const jobs = await fetchAllJobs('id,company,position,location,status,platform,updated_at');
-    const { data: events } = await cloud.database.from('job_events').select('*').order('created_at',{ascending:false}).limit(30);
+    const { data: events } = await cloud.database.from('job_events').select('*').order('created_at',{ascending:false}).limit(30).eq('owner_id', MY_OWNER());
     const all = jobs||[];
     const cnt = {}; STATUSES.forEach(s=>cnt[s]=0); all.forEach(j=>{ cnt[j.status]=(cnt[j.status]||0)+1; });
     const tracked = cnt['待投递']+cnt['已投递']+cnt['已查看']+cnt['已回复']+cnt['面试邀请'];
@@ -1322,7 +1338,7 @@ async function loadDashboard(){
 async function updateStatus(id, status, note){
   try{
     requireSession();
-    const r = await cloud.database.from('jobs').update({ status, updated_at:new Date().toISOString() }).eq('id', id).select();
+    const r = await cloud.database.from('jobs').update({ status, updated_at:new Date().toISOString() }).eq('id', id).eq('owner_id', MY_OWNER()).select();
     if (!Array.isArray(r.data) || !r.data.length) return toast('更新失败：记录不存在或无权限');
     await logEvent(id, '状态→' + status, note || null);
     toast('✅ 已更新为「' + status + '」');
@@ -1454,9 +1470,9 @@ async function autoCollectIfStale(hrs){
   if (Date.now() - Number(localStorage.getItem('autoCollectAt') || 0) < 90 * 60 * 1000) return false;
   localStorage.setItem('autoCollectAt', String(Date.now()));
   try{
-    const { data: pend } = await cloud.database.from('agent_tasks').select('id').eq('type','collect_now').eq('status','pending').limit(1);
+    const { data: pend } = await cloud.database.from('agent_tasks').select('id').eq('type','collect_now').eq('status','pending').limit(1).eq('owner_id', MY_OWNER());
     if (pend && pend.length) return false;
-    await cloud.database.from('agent_tasks').insert({
+    await cloud.database.from('agent_tasks').insert({ owner_id: MY_OWNER(),
       owner_name: (session && session.user && session.user.name) || null,
       type: 'collect_now', status: 'pending',
       note: '应用打开时检测到数据超过 8 小时未更新，自动排入补采'
@@ -1468,7 +1484,7 @@ async function loadFreshness(){
   const bar = $('#freshBar');
   if(!bar) return;
   try{
-    const { data } = await cloud.database.from('jobs').select('*').order('created_at',{ascending:false}).limit(1);
+    const { data } = await cloud.database.from('jobs').select('*').order('created_at',{ascending:false}).limit(1).eq('owner_id', MY_OWNER());
     const row = data && data[0];
     const last = row && row.created_at ? new Date(row.created_at).getTime() : 0;
     if(!last){ bar.style.display = 'none'; return; }
