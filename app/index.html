@@ -706,10 +706,43 @@ function decidedIndex(all){
 /* 全量取 jobs：按 id 键集分页（每页 900），池子再大也不会被 limit 截断。
    与后端 dump-existing.py 同一套思路——云库单次查询有行数上限，靠分页绕开。 */
 async function fetchAllJobs(cols = '*'){
+  const owner = MY_OWNER();
   const all = []; let last = 0;
+  async function grab(withOwner){
+    let q = cloud.database.from('jobs').select(cols).gt('id', last).order('id').limit(900);
+    if (withOwner && owner) q = q.eq('owner_id', owner);
+    return await q;
+  }
   for(;;){
-    const { data, error } = await cloud.database.from('jobs').select(cols).gt('id', last).order('id').limit(900).eq('owner_id', MY_OWNER());
+    let { data, error } = await grab(true);
     if (error) throw error;
+    // 首屏为空诊断：可能是 token 失效(RLS 匿名→[]) 或前端 owner 值与 auth.uid() 不一致。
+    // 降级为不带 owner 过滤重试；账号隔离仍由数据库 RLS 强制保证，不会越权。
+    if (last === 0 && (!data || !data.length) && session){
+      let diag = { owner, at: new Date().toISOString() };
+      try{
+        let helper = null;
+        try{ const { data: pr } = await cloud.database.from('profiles').select('owner_id').limit(1); helper = pr; }catch(_){}
+        diag.rlsOnlyOwners = helper && helper.length ? [...new Set(helper.map(x => x.owner_id))] : [];
+        const retry = await grab(false);
+        if (!retry.error && retry.data && retry.data.length){
+          diag.fallbackRows = retry.data.length;
+          diag.reason = 'owner_mismatch';
+          window.__lastFetchDiag = diag;
+          data = retry.data;
+        } else {
+          diag.fallbackRows = 0;
+          // 再探登录态：getSession 是否仍返回有效 session
+          try{
+            const s = await cloud.auth.getSession();
+            diag.sessionOk = !!(s && s.data && s.data.user && s.data.user.id);
+            diag.sessionUserId = s && s.data && s.data.user ? s.data.user.id : null;
+          }catch(e){ diag.sessionOk = false; }
+          diag.reason = diag.sessionOk === false ? 'session_invalid' : 'no_data_or_rls';
+          window.__lastFetchDiag = diag;
+        }
+      }catch(e){ diag.reason = 'diag_error'; diag.error = String(e && e.message || e); window.__lastFetchDiag = diag; }
+    }
     if (!data || !data.length) break;
     all.push(...data);
     if (data.length < 900) break;
@@ -1070,6 +1103,22 @@ $('#triggerCollectBtn').onclick = async () => {
   }catch(e){ toast('触发失败：' + (e.message || e)); }
   finally{ $('#triggerCollectBtn').disabled = false; }
 };
+function emptyPoolMessage(){
+  const d = window.__lastFetchDiag;
+  if (!d) return '岗位池为空，先去粘贴几个猎聘职位描述吧 👆';
+  if (d.reason === 'owner_mismatch'){
+    return '检测到登录账号与岗位数据账号不一致，已自动按数据库权限读取（数据安全）。当前登录账号：'
+      + esc(d.owner || '未知') + '。建议退出后重新登录投递助手账号。';
+  }
+  if (d.reason === 'session_invalid' || d.reason === 'diag_error'){
+    return '登录状态已失效，岗位读取被中断。请点击下方「重新登录」后重试。（诊断：' + esc(d.reason) + '）'
+      + ' <button class="btn small" onclick="document.querySelector(\'#logoutBtn\')&&document.querySelector(\'#logoutBtn\').click()">重新登录</button>';
+  }
+  if (d.reason === 'no_data_or_rls'){
+    return '当前账号下未读取到岗位。若你确认账号正确，可能是登录态过期，请退出后重新登录。';
+  }
+  return '岗位池为空，先去粘贴几个猎聘职位描述吧 👆';
+}
 async function loadPool(){
   try{
     requireSession();
@@ -1095,7 +1144,7 @@ async function loadPool(){
       + (coveredN ? ` <span class="muted">· 已隐藏 ${coveredN} 条与你已有决定重复</span>` : '');
     $('#poolList').innerHTML = (shown.length
       ? shown.map(jobCard).join('')
-      : `<div class="empty">${allPool.length ? '当前筛选条件下没有岗位，换个条件试试' : '岗位池为空，先去粘贴几个猎聘职位描述吧 👆'}</div>`)
+      : `<div class="empty">${allPool.length ? '当前筛选条件下没有岗位，换个条件试试' : emptyPoolMessage()}</div>`)
       + pagerHtml('pool', sortedPool.length, page);
     document.querySelectorAll('[data-del]').forEach(b => b.onclick = () => delJob(b.dataset.del));
     bindPager('pool');
