@@ -8,7 +8,7 @@
 | # | 历史事故 | 根因 | 现在的防线 | 防线怎么验证 |
 |---|---|---|---|---|
 | 1 | 11-07~11-09 停更 3 天 | 纯钟点调度「22–06 不跑」+ 电脑睡眠 60 小时 | 调度 P1 条款：库里最新岗位超 14 小时立即补采，深夜也跑，不看钟点 | 应用顶部「最近入库」超 14h 仍未自愈 → 查自动化是否 PAUSED |
-| 2 | 池过千后查重崩溃（DATABASE_RESULT_EXCEED_MAX_ROWS） | 云库单次查询上限 1000 行，`SELECT ... LIMIT 2000` 直接报错 | `scripts/dump-existing.py` 按 id 键集分页（每页 900），采集轮禁止手写 LIMIT 2000 | 脚本存在且 `python scripts/dump-existing.py` 能导出全量 |
+| 2 | 池过千后查重崩溃（DATABASE_RESULT_EXCEED_MAX_ROWS） | 云库单次查询上限 1000 行，`SELECT ... LIMIT 2000` 直接报错 | `scripts/dump-existing.py` 按 id 键集分页（默认每页 300，导出含 platform 等 13 列），采集轮禁止手写 LIMIT 2000 | 脚本存在且 `python scripts/dump-existing.py` 能导出全量 |
 | 3 | 猎聘 75 条整批判 26 分沉底 | HR 硬冲突正则吃掉「招聘」标题前缀 | `scripts/score_jobs.py` 固化：打分前剥前缀 + HR 正则收窄；采集轮禁止临时改打分脚本 | 打分只调 score_jobs.py，`.workbuddy/tmp` 里不再出现 scoreN.py |
 | 4 | 领英整天 0 条 | 门禁看「出口 IP 是否 CN」误杀 | 门禁改为接口实测（GATE PASS = 返回 ≥1 张卡片）；调度铁律 2 明文禁止按 IP 跳过 | 自动化 prompt 里铁律 2 存在；check-network.sh 同口径 |
 | 5 | 领英固定前 3 词吃干第一页 | 关键词不轮换、不翻页 | 游标轮换（`.workbuddy/tmp/*-kw-cursor.txt`）+ 每词 5 页 | 两个游标文件存在且每轮推进 |

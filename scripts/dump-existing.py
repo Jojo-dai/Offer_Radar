@@ -12,6 +12,7 @@
 import argparse
 import json
 import sys
+import time
 from pathlib import Path
 
 WS = Path(__file__).resolve().parents[2]
@@ -19,12 +20,17 @@ sys.path.insert(0, str(WS / ".workbuddy" / "tmp"))
 import dbq  # noqa: E402
 
 OWNER = "wb:Cndyfv_eOir07ck0FARtAjlvVeet"
-COLS = "id, company, position, source_url, salary, location, status, match_score"
+# 2026-11-24 修正：原来只导 8 列（缺 platform/jd_summary/match_reason/created_at/updated_at），
+# 用这份 JSON 重建本地库时 platform 一律落到默认值「猎聘」，1107 条领英岗位全被显示成猎聘。
+# 备份/迁移用的导出必须自带这几列，否则重建即失真。
+COLS = ("id, company, position, source_url, salary, location, status, match_score, "
+        "platform, jd_summary, match_reason, created_at, updated_at")
 
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--page", type=int, default=900, help="每页行数，必须 < 1000（云库硬上限）")
+    ap.add_argument("--page", type=int, default=300,
+                    help="每页行数，默认 300（<1000）。13 列 × 900 行会超过 MCP 响应体积、稳定 500，故默认下调")
     ap.add_argument("--out", default=str(WS / ".workbuddy" / "tmp" / "existing-jobs.json"))
     a = ap.parse_args()
     if a.page >= 1000:
@@ -34,7 +40,16 @@ def main():
     while True:
         q = ("SELECT %s FROM jobs WHERE owner_id='%s' AND id > %d ORDER BY id LIMIT %d"
              % (COLS, OWNER, last, a.page))
-        chunk = dbq.sql(q, "read", as_json=True)
+        # 云库 MCP 偶发 500（间歇性），单页失败不应让整轮导出作废
+        for attempt in range(5):
+            try:
+                chunk = dbq.sql(q, "read", as_json=True)
+                break
+            except Exception as e:
+                print("  retry %d: %s" % (attempt + 1, str(e)[:80]))
+                time.sleep(3)
+        else:
+            raise SystemExit("查询连续失败，导出中止：%s" % q[:200])
         if isinstance(chunk, str):
             raise SystemExit("查询失败：" + chunk[:300])
         if not chunk:
